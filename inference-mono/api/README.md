@@ -1,4 +1,4 @@
-# Inference API
+# Main API
 
 API-only FastAPI backend for account, auth, billing, API-key management, admin, wallet, and usage dashboard workflows. Inference endpoints run in the separate `../inference_api` service so they can be deployed behind a TEE.
 
@@ -22,6 +22,7 @@ docker compose up --build
 The API is available at `http://localhost:8000`.
 
 The standalone inference API is in `../inference_api` and defaults to `http://localhost:8001`.
+When running both locally, keep `SECRET_PEPPER` identical in `.env` and `../inference_api/.env`.
 
 Run migrations outside Docker:
 
@@ -46,6 +47,8 @@ POSTGRES_TEST_DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/test_db
 ## Environment
 
 Set strong unique values for `JWT_SECRET`, `VERIFICATION_TOKEN_SECRET`, `RESET_PASSWORD_TOKEN_SECRET`, `SESSION_SECRET`, `OAUTH_STATE_SECRET`, and `SECRET_PEPPER`. Production refuses placeholder or short secrets and requires explicit `ALLOWED_HOSTS`, `CORS_ORIGINS`, `RATE_LIMIT_FAIL_OPEN=false`, `TOKEN_REVOCATION_FAIL_OPEN=false`, and an owned `PHONE_USER_EMAIL_DOMAIN`.
+
+The main API is the only service that runs Alembic migrations. The inference API reads and writes the same database schema but does not own migrations.
 
 Access-token logout and password-reset invalidation use Redis. In production, keep Redis highly available and set `TOKEN_REVOCATION_FAIL_OPEN=false` so token checks fail closed if the denylist cannot be read.
 

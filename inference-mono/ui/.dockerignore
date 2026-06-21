@@ -1,8 +1,9 @@
-.next
-node_modules
-*.log
-*.tsbuildinfo
-.env
 .env.local
-.env.development.local
-.env.production.local
+.next/
+node_modules/
+.pnpm-store/
+.turbo/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*

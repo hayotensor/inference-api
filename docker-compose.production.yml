@@ -28,9 +28,8 @@ services:
 
   api:
     build:
-      context: ./inference-mono/api
-    env_file:
-      - ./inference-mono/api/.env
+      context: ${API_CONTEXT:-./inference-mono/api}
+    env_file: ${API_ENV_FILE:-./inference-mono/api/.env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -38,6 +37,12 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     command: >
       sh -c "alembic upgrade head &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000"
@@ -45,9 +50,8 @@ services:
 
   inference_api:
     build:
-      context: ./inference-mono/inference_api
-    env_file:
-      - ./inference-mono/inference_api/.env
+      context: ${INFERENCE_API_CONTEXT:-./inference-mono/inference_api}
+    env_file: ${INFERENCE_API_ENV_FILE:-./inference-mono/inference_api/.env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -55,24 +59,42 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     command: >
       uvicorn inference_api.main:app --host 0.0.0.0 --port 8001
     restart: unless-stopped
 
   ui:
     build:
-      context: ./inference-mono/ui
+      context: ${UI_CONTEXT:-./inference-mono/ui}
       args:
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
         NEXT_PUBLIC_INFERENCE_API_BASE_URL: ${NEXT_PUBLIC_INFERENCE_API_BASE_URL}
         NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID:-}
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
       inference_api:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "127.0.0.1:3000:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3000').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     environment:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"

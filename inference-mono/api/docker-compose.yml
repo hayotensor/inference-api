@@ -35,13 +35,19 @@ services:
         condition: service_healthy
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     command: >
       sh -c "alembic upgrade head &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
   inference_api:
-    build: ../inference_api
-    env_file: ../inference_api/.env
+    build: ${INFERENCE_API_CONTEXT:-../inference_api}
+    env_file: ${INFERENCE_API_ENV_FILE:-../inference_api/.env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,6 +55,12 @@ services:
         condition: service_healthy
     ports:
       - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     command: >
       uvicorn inference_api.main:app --host 0.0.0.0 --port 8001
 

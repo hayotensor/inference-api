@@ -14,3 +14,8 @@ pnpm dev
 ```
 
 By default the UI expects the main API at `http://localhost:8000` and inference API at `http://localhost:8001`.
+
+For production Docker builds, both public URLs are build args:
+
+- `NEXT_PUBLIC_API_BASE_URL`
+- `NEXT_PUBLIC_INFERENCE_API_BASE_URL`

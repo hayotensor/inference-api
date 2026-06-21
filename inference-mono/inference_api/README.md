@@ -20,6 +20,14 @@ uvicorn inference_api.main:app --host 0.0.0.0 --port 8001
 ```
 
 The main API remains on port `8000`; this service defaults to port `8001` in Docker examples.
+Only the main API runs migrations. Run this service against a database that has already been migrated by the main API.
+
+Run tests:
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
 
 ## Mesh Routing
 
