@@ -3,9 +3,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from inference_api.config import settings
 
@@ -20,6 +20,7 @@ class APIKeyUsageSummary(BaseModel):
 class ModelInfo(BaseModel):
     id: str
     object: Literal["model"] = "model"
+    created: int = 0
     owned_by: str
 
 
@@ -40,6 +41,40 @@ class InferenceResponse(BaseModel):
     model: str
     output: str
     usage: dict[str, int]
+
+
+class OpenAIChatMessage(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    role: Literal["developer", "system", "user", "assistant", "tool", "function"]
+    content: str | list[dict[str, Any]] | None = None
+    name: str | None = None
+
+
+class OpenAIStreamOptions(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    include_usage: bool = False
+
+
+class OpenAIChatCompletionRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    model: str = Field(default="demo-chat-001", min_length=1, max_length=120)
+    messages: list[OpenAIChatMessage] = Field(min_length=1)
+    max_tokens: int | None = Field(default=None, ge=1, le=4096)
+    max_completion_tokens: int | None = Field(default=None, ge=1, le=4096)
+    stream: bool = False
+    stream_options: OpenAIStreamOptions | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    n: int = Field(default=1, ge=1, le=1)
+    stop: str | list[str] | None = None
+    user: str | None = None
+
+    @property
+    def resolved_max_tokens(self) -> int:
+        return self.max_completion_tokens or self.max_tokens or 128
 
 
 class RouterReservationCreate(BaseModel):

@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 
 from inference_api.db import async_session_maker
@@ -58,3 +59,92 @@ async def test_api_key_scope_expiration_and_revocation_failures(client, seed_api
     revoked = await seed_api_key(raw_key="sk_test_revoked", revoked_at=utcnow())
     revoked_response = await client.get("/v1/models", headers={"Authorization": f"Bearer {revoked.raw_key}"})
     assert revoked_response.status_code == 401
+
+
+async def test_openai_chat_completion_uses_bearer_key_and_tracks_usage(client, seed_api_key):
+    seeded = await seed_api_key(raw_key="sk_test_openai_chat", credits=10_000)
+
+    response = await client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {seeded.raw_key}"},
+        json={
+            "model": "demo-chat-001",
+            "messages": [
+                {"role": "system", "content": "Answer tersely."},
+                {"role": "user", "content": "hello platform"},
+            ],
+            "max_tokens": 64,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["id"].startswith("chatcmpl_")
+    assert body["object"] == "chat.completion"
+    assert body["model"] == "demo-chat-001"
+    assert body["choices"] == [
+        {
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "Echo: system: Answer tersely.\n\nuser: hello platform",
+            },
+            "finish_reason": "stop",
+        }
+    ]
+    assert body["usage"] == {
+        "prompt_tokens": 6,
+        "completion_tokens": 7,
+        "total_tokens": 13,
+    }
+
+    usage = await client.get("/v1/usage", headers={"Authorization": f"Bearer {seeded.raw_key}"})
+    assert usage.status_code == 200, usage.text
+    assert usage.json()["input_tokens"] == 6
+    assert usage.json()["output_tokens"] == 7
+
+
+async def test_openai_chat_completion_streams_sse_chunks(client, seed_api_key):
+    seeded = await seed_api_key(raw_key="sk_test_openai_stream", credits=10_000)
+
+    response = await client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {seeded.raw_key}"},
+        json={
+            "model": "demo-chat-001",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "stream hello"}]}],
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = [line.removeprefix("data: ") for line in response.text.splitlines() if line.startswith("data: ")]
+    assert events[-1] == "[DONE]"
+    chunks = [json.loads(event) for event in events[:-1]]
+    assert chunks[0]["object"] == "chat.completion.chunk"
+    assert chunks[0]["choices"][0]["delta"] == {"role": "assistant"}
+    assert chunks[1]["choices"][0]["delta"] == {"content": "Echo: user: stream hello"}
+    assert chunks[2]["choices"][0]["finish_reason"] == "stop"
+    assert chunks[3]["choices"] == []
+    assert chunks[3]["usage"] == {
+        "prompt_tokens": 3,
+        "completion_tokens": 4,
+        "total_tokens": 7,
+    }
+
+
+async def test_openai_chat_completion_requires_inference_scope(client, seed_api_key):
+    seeded = await seed_api_key(raw_key="sk_test_no_inference_scope", scopes=["models:read"], credits=10_000)
+
+    response = await client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {seeded.raw_key}"},
+        json={
+            "model": "demo-chat-001",
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    )
+
+    assert response.status_code == 403
