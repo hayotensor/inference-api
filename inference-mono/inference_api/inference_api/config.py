@@ -41,12 +41,108 @@ class Settings(BaseSettings):
     mesh_router_url: str | None = None
     mesh_request_timeout_seconds: int = Field(default=120, ge=1, le=600)
 
+    # --- SERVING / COORDINATION plane ------------------------------------- #
+    # Provisioner (platform -> enclave credential sealing) ----------------- #
+    provisioner_enabled: bool = False
+    # Platform Ed25519 signing key used to sign /provision payloads. Either a
+    # filesystem path to a 32-byte raw or 64-hex seed, or the seed hex inline.
+    provisioner_signing_key_path: str | None = None
+    provisioner_signing_key_hex: SecretStr | None = None
+    # The platform provisioner's verify key hex (advertised to the miner's
+    # validator_static_keys so the enclave accepts our provision payloads).
+    provisioner_verify_key_hex: str | None = None
+    # Dedicated Fernet key for at-rest encryption of provisioned tokens. This is
+    # NOT secret_pepper: token confidentiality is independent of token hashing.
+    provisioner_token_encryption_key: SecretStr | None = None
+    attestation_ttl_seconds: int = Field(default=3600, ge=60, le=2_592_000)
+    token_ttl_seconds: int = Field(default=86_400, ge=60, le=2_592_000)
+    allow_dev_attestation: bool = False
+    # After a successful provision, have the platform (which alone holds the freshly
+    # minted enclave admin token) drive the TEE's POST /engine/start so the advertised
+    # model is actually loaded and the proxy can serve real completions. Off by default
+    # so the existing provisioner path/tests stay unchanged; the cross-process E2E sets
+    # PROVISIONER_START_ENGINE=true. See ProvisionerService._maybe_start_engine.
+    provisioner_start_engine: bool = False
+    # Engine name the platform asks the TEE to launch when provisioner_start_engine is on.
+    # In dev/mock mode the TEE ignores this and runs the bundled mock engine; the value
+    # must still satisfy the TEE's StartRequest schema (Literal["vllm", "sglang"]).
+    provisioner_engine_name: Literal["vllm", "sglang"] = "vllm"
+    # Bound wall-clock wait for the TEE engine to report ready after /engine/start.
+    provisioner_engine_start_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
+
+    # Attestation verifier backend selection / credentials passthrough ----- #
+    verifier_backend: Literal["auto", "stub", "nvidia_nras", "intel_pcs", "mock", "dev"] = "auto"
+    nras_api_url: str | None = None
+    nras_api_key: SecretStr | None = None
+    pcs_api_url: str | None = None
+    pcs_api_key: SecretStr | None = None
+
+    # --- Attestation policy: NVIDIA NRAS (real backend) config ------------- #
+    # Fed to talaris_attest.build_expected_claims via NvidiaPolicy. Unset (None)
+    # fields keep the backend's own production-safe defaults. The production
+    # NVIDIA path FAILS CLOSED unless jwks_url/expected_issuer/nvidia_root_pem
+    # are supplied (so we never silently accept unverifiable GPU evidence).
+    nras_jwks_url: str | None = None
+    nras_expected_issuer: str | None = None
+    nras_url: str | None = None
+    # NVIDIA NRAS signing root: either an inline PEM or a filesystem path that is
+    # read at policy-build time. Stored verbatim here; resolution lives in the
+    # provisioner (so config stays declarative).
+    nvidia_root_pem: str | None = None
+
+    # --- Attestation policy: Intel TDX/PCS (real backend) config ----------- #
+    # Production Intel defaults are already fully real (bundled Intel SGX Root CA
+    # + live Intel PCS). require_collateral defaults True (production-safe);
+    # allowed_tcb_statuses=None keeps the backend default set.
+    intel_require_collateral: bool = True
+    intel_allowed_tcb_statuses: Annotated[frozenset[str] | None, NoDecode] = None
+
+    # --- Hardware-evidence requirements (passthrough to the factory) ------- #
+    require_tdx_quote: bool = True
+    require_gpu_evidence: bool = True
+
+    # Chain mapping (Substrate read) --------------------------------------- #
+    chain_rpc_url: str | None = None
+    chain_required: bool = False
+    chain_min_class: str | None = "Included"
+
+    # TEE forwarding / timeouts -------------------------------------------- #
+    tee_connect_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    tee_attestation_timeout_seconds: float = Field(default=15.0, gt=0, le=120)
+    tee_provision_timeout_seconds: float = Field(default=15.0, gt=0, le=120)
+    tee_forward_timeout_seconds: float = Field(default=120.0, gt=0, le=600)
+    forward_max_attempts: int = Field(default=3, ge=1, le=10)
+    tls_pin_enforce: bool = True
+
+    # Self-registration ---------------------------------------------------- #
+    registration_key_type: Literal["sr25519", "ed25519"] = "sr25519"
+    registration_nonce_ttl_seconds: int = Field(default=300, ge=30, le=3600)
+
+    # Background maintenance intervals (seconds) --------------------------- #
+    heartbeat_interval_seconds: int = Field(default=60, ge=5, le=3600)
+    dereg_after_seconds: int = Field(default=3600, ge=60, le=2_592_000)
+    maintenance_interval_seconds: int = Field(default=120, ge=5, le=3600)
+    health_stale_after_seconds: int = Field(default=300, ge=30, le=86_400)
+    provisioner_loop_interval_seconds: int = Field(default=60, ge=5, le=3600)
+
     @field_validator("cors_origins", "allowed_hosts", mode="before")
     @classmethod
     def split_lists(cls, value: Any) -> list[str]:
         return _split_csv(value)
 
-    @field_validator("mesh_router_url", mode="before")
+    @field_validator("intel_allowed_tcb_statuses", mode="before")
+    @classmethod
+    def split_tcb_statuses(cls, value: Any) -> frozenset[str] | None:
+        # Unset -> None (keep the backend's default TCB-status set). A non-empty
+        # CSV (e.g. "UpToDate,SWHardeningNeeded") -> an explicit allowlist.
+        if value is None:
+            return None
+        if isinstance(value, frozenset):
+            return value
+        items = _split_csv(value)
+        return frozenset(items) if items else None
+
+    @field_validator("mesh_router_url", "chain_rpc_url", mode="before")
     @classmethod
     def normalize_optional_url(cls, value: Any) -> str | None:
         if value is None:

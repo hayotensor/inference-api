@@ -7,18 +7,40 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from inference_api.allowlist_routes import router as allowlist_router
 from inference_api.config import settings
 from inference_api.logging import configure_logging, request_id_ctx
+from inference_api.maintenance.tasks import MaintenanceLoop
+from inference_api.miners.routes import router as miners_router
 from inference_api.product_routes import router as product_router
-from inference_api.redis import close_redis
+from inference_api.provisioner.loop import ProvisionerLoop
+from inference_api.redis import close_redis, get_redis_client
 from inference_api.router_routes import router as router_service_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging(settings.debug)
-    yield
-    await close_redis()
+    provisioner_loop: ProvisionerLoop | None = None
+    maintenance_loop: MaintenanceLoop | None = None
+    if settings.provisioner_enabled:
+        redis_client = None
+        try:
+            redis_client = get_redis_client()
+        except Exception:  # noqa: BLE001 - redis optional; loops fall back to asyncio locks
+            redis_client = None
+        provisioner_loop = ProvisionerLoop(redis_client=redis_client)
+        maintenance_loop = MaintenanceLoop()
+        provisioner_loop.start()
+        maintenance_loop.start()
+    try:
+        yield
+    finally:
+        if provisioner_loop is not None:
+            await provisioner_loop.stop()
+        if maintenance_loop is not None:
+            await maintenance_loop.stop()
+        await close_redis()
 
 
 def create_app() -> FastAPI:
@@ -64,6 +86,8 @@ def create_app() -> FastAPI:
 
     app.include_router(product_router)
     app.include_router(router_service_router)
+    app.include_router(miners_router)
+    app.include_router(allowlist_router)
     return app
 
 

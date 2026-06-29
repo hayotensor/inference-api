@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 class ServiceClientRole(enum.StrEnum):
     router = "router"
+    miner = "miner"
 
 
 class ServiceClient(Base):

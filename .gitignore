@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+build/
+dist/
+
+# Test / type / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Local data / secrets (note: a template .env is already tracked upstream)
+*.sqlite
+*.sqlite3
+*.db
+*.key
+*.pem
+
+# OS / editor
+.DS_Store
+*.swp

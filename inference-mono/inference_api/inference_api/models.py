@@ -14,11 +14,15 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
+    LargeBinary,
     MetaData,
     Numeric,
     String,
+    UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -63,6 +67,7 @@ class HyphenatedUUID(TypeDecorator):
 
 class ServiceClientRole(enum.StrEnum):
     router = "router"
+    miner = "miner"
 
 
 class User(Base):
@@ -215,6 +220,15 @@ class InferenceUsageEvent(Base):
     router_client_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("service_clients.id"), index=True
     )
+    miner_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("miners.id", ondelete="set null"), index=True
+    )
+    miner_hotkey: Mapped[str | None] = mapped_column(String(128), index=True)
+    miner_model_hash: Mapped[str | None] = mapped_column(String(128))
+    miner_model_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("miner_models.id", ondelete="set null"), index=True
+    )
+    miner_receipt_node_id: Mapped[str | None] = mapped_column(String(128))
     request_id: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
     model: Mapped[str] = mapped_column(String(120), index=True, nullable=False)
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -228,3 +242,121 @@ class InferenceUsageEvent(Base):
     settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True, nullable=False)
+
+
+# --------------------------------------------------------------------------- #
+# SERVING / COORDINATION plane tables. These MIRROR
+# api/app/db/models/miner.py; the two definition sites MUST stay in sync.
+# --------------------------------------------------------------------------- #
+
+
+class Miner(Base):
+    __tablename__ = "miners"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=generate_uuid)
+    hotkey: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    subnet_node_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    peer_id: Mapped[str | None] = mapped_column(String(128))
+    tee_endpoint: Mapped[str] = mapped_column(String(512), nullable=False)
+    tls_cert_fingerprint: Mapped[str | None] = mapped_column(String(128))
+    enclave_verify_key: Mapped[str | None] = mapped_column(String(128))
+    attestation_status: Mapped[str] = mapped_column(String(16), default="pending", index=True, nullable=False)
+    attestation_mode: Mapped[str | None] = mapped_column(String(32))
+    attestation_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attestation_expiry: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    miner_hash: Mapped[str | None] = mapped_column(String(128), index=True)
+    chain_class: Mapped[str | None] = mapped_column(String(64))
+    health: Mapped[str] = mapped_column(String(16), default="unknown", index=True, nullable=False)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    capacity: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    usage_chain_head: Mapped[str | None] = mapped_column(String(128))
+    usage_count: Mapped[int | None] = mapped_column(Integer)
+    usage_total_tokens: Mapped[int | None] = mapped_column(Integer)
+    registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+
+class MinerModel(Base):
+    __tablename__ = "miner_models"
+    __table_args__ = (
+        UniqueConstraint(
+            "miner_id", "model_id", "model_version", name="uq_miner_models_miner_model_version"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=generate_uuid)
+    miner_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("miners.id", ondelete="cascade"), index=True, nullable=False
+    )
+    model_id: Mapped[str] = mapped_column(String(200), index=True, nullable=False)
+    model_version: Mapped[str | None] = mapped_column(String(120))
+    model_hash: Mapped[str | None] = mapped_column(String(128))
+    # Per-model-enclave serving + attestation state (one single-model enclave per row,
+    # fronted by the miner's SNI proxy). Null falls back to the parent Miner row.
+    tee_endpoint: Mapped[str | None] = mapped_column(String(512))
+    tls_cert_fingerprint: Mapped[str | None] = mapped_column(String(128))
+    enclave_verify_key: Mapped[str | None] = mapped_column(String(128))
+    attestation_status: Mapped[str] = mapped_column(String(16), default="pending", index=True, nullable=False)
+    attestation_mode: Mapped[str | None] = mapped_column(String(32))
+    attestation_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attestation_expiry: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    usage_chain_head: Mapped[str | None] = mapped_column(String(128))
+    usage_count: Mapped[int | None] = mapped_column(Integer)
+    usage_total_tokens: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32), default="loaded", nullable=False)
+    loaded: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_advertised_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class ProvisionedToken(Base):
+    __tablename__ = "provisioned_tokens"
+    __table_args__ = (
+        Index(
+            "uq_provisioned_tokens_miner_model_active",
+            "miner_id",
+            "model_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=generate_uuid)
+    miner_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("miners.id", ondelete="cascade"), index=True, nullable=False
+    )
+    model_id: Mapped[str | None] = mapped_column(String(200), index=True)
+    key_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    encrypted_token: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    admin_encrypted_token: Mapped[bytes | None] = mapped_column(LargeBinary)
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True, nullable=False)
+    provisioned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class ModelAllowlist(Base):
+    """Platform-approved model artifacts: the canonical (model_id -> approved hash) set the
+    attestation verifier checks a miner's attested model_hash against. Mirrors
+    ``talaris_attest.claims.ModelAllowlistEntry``."""
+
+    __tablename__ = "model_allowlist"
+    __table_args__ = (
+        UniqueConstraint(
+            "model_id", "model_version", "model_hash", name="uq_model_allowlist_model_version_hash"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=generate_uuid)
+    model_id: Mapped[str] = mapped_column(String(200), index=True, nullable=False)
+    model_version: Mapped[str | None] = mapped_column(String(120))
+    model_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    args_hash: Mapped[str | None] = mapped_column(String(128))
+    gpu_hash: Mapped[str | None] = mapped_column(String(128))
+    label: Mapped[str | None] = mapped_column(String(120))
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )

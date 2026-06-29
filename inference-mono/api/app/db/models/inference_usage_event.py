@@ -37,6 +37,15 @@ class InferenceUsageEvent(Base):
     router_client_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("service_clients.id", ondelete="set null"), index=True
     )
+    miner_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("miners.id", ondelete="set null"), index=True
+    )
+    miner_hotkey: Mapped[str | None] = mapped_column(String(128), index=True)
+    miner_model_hash: Mapped[str | None] = mapped_column(String(128))
+    miner_model_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("miner_models.id", ondelete="set null"), index=True
+    )
+    miner_receipt_node_id: Mapped[str | None] = mapped_column(String(128))
     request_id: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
     model: Mapped[str] = mapped_column(String(120), index=True, nullable=False)
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

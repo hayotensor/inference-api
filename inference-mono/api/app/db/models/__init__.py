@@ -10,6 +10,8 @@ from app.db.models.email_verification_token import EmailVerificationToken
 from app.db.models.evm_wallet import EVMWallet
 from app.db.models.inference_usage_event import InferenceUsageEvent
 from app.db.models.manual_token_adjustment import ManualTokenAdjustment
+from app.db.models.miner import Miner, MinerModel, ProvisionedToken
+from app.db.models.model_allowlist import ModelAllowlist
 from app.db.models.model_pricing import ModelPricing
 from app.db.models.oauth_account import OAuthAccount
 from app.db.models.password_reset_token import PasswordResetToken
@@ -37,6 +39,10 @@ __all__ = [
     "EVMWallet",
     "InferenceUsageEvent",
     "ManualTokenAdjustment",
+    "Miner",
+    "MinerModel",
+    "ProvisionedToken",
+    "ModelAllowlist",
     "ModelPricing",
     "OAuthAccount",
     "PasswordResetToken",
