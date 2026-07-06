@@ -34,9 +34,27 @@ class Settings(BaseSettings):
     router_max_input_tokens: int = Field(default=1_000_000, ge=1)
     router_max_output_tokens: int = Field(default=1_000_000, ge=1)
 
-    token_reset_mode: Literal["account_creation", "calendar_month"] = "account_creation"
+    token_reset_mode: Literal["account_creation", "calendar_month", "weekly"] = "account_creation"
     token_reset_day: int = Field(default=1, ge=1, le=28)
+    token_reset_weekday: int = Field(default=0, ge=0, le=6)  # 0 = Monday (weekly mode anchor)
     free_monthly_token_allowance: int = Field(default=0, ge=0)
+
+    # --- Subnet-stake weekly quota (reads ht-indexer) --------------------- #
+    # Reward continuous subnet delegators with a weekly, stake-proportional
+    # inference-token quota. Off by default; when enabled the maintenance loop
+    # reads the ht-indexer and writes a hypertensor/subnet_stake allowance
+    # snapshot that the usage gate sums like any other crypto allowance.
+    subnet_stake_quota_enabled: bool = False
+    ht_indexer_graphql_url: str | None = None  # e.g. http://localhost:4350/graphql
+    ht_indexer_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    subnet_stake_subnet_id: int | None = None  # which subnet's delegation counts
+    subnet_stake_decimals: int = Field(default=18, ge=0, le=36)  # native-token decimals
+    subnet_stake_min_days: int = Field(default=30, ge=0, le=3650)  # min continuous stake age
+    subnet_stake_min_amount: int = Field(default=0, ge=0)  # min normalized stake to qualify
+    subnet_stake_tokens_unit: int = Field(default=1, ge=1)  # normalized stake per unit
+    subnet_stake_tokens_per_unit: int = Field(default=0, ge=0)  # tokens granted per unit
+    subnet_stake_weekly_token_cap: int = Field(default=0, ge=0)  # 0 = uncapped
+    subnet_stake_refresh_interval_seconds: int = Field(default=900, ge=30, le=86_400)
 
     mesh_router_url: str | None = None
     mesh_request_timeout_seconds: int = Field(default=120, ge=1, le=600)
@@ -150,6 +168,17 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return str(value).rstrip("/")
+
+    @model_validator(mode="after")
+    def validate_subnet_stake_quota(self) -> "Settings":
+        # Fail closed on misconfig: enabling the quota without a way to reach the
+        # indexer (or without a target subnet) would silently grant nobody.
+        if self.subnet_stake_quota_enabled:
+            if not self.ht_indexer_graphql_url:
+                raise ValueError("HT_INDEXER_GRAPHQL_URL is required when SUBNET_STAKE_QUOTA_ENABLED=true")
+            if self.subnet_stake_subnet_id is None:
+                raise ValueError("SUBNET_STAKE_SUBNET_ID is required when SUBNET_STAKE_QUOTA_ENABLED=true")
+        return self
 
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":

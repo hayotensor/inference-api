@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import calendar
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import ROUND_CEILING, Decimal
 
 from sqlalchemy import and_, case, func, or_, select
@@ -89,6 +89,15 @@ def _calendar_month_period(now: datetime) -> tuple[datetime, datetime]:
     return start, end
 
 
+def _weekly_period(now: datetime) -> tuple[datetime, datetime]:
+    """7-day window anchored at midnight UTC of the most recent token_reset_weekday."""
+    current = as_utc(now)
+    midnight = datetime(current.year, current.month, current.day, tzinfo=UTC)
+    days_since_anchor = (midnight.weekday() - settings.token_reset_weekday) % 7
+    start = midnight - timedelta(days=days_since_anchor)
+    return start, start + timedelta(days=7)
+
+
 class UsageService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -104,6 +113,7 @@ class UsageService:
             "stripe_monthly_allowance": period.stripe_allowance,
             "ethereum_erc20_balance_allowance": period.ethereum_erc20_allowance,
             "substrate_evm_native_balance_allowance": period.substrate_native_allowance,
+            "subnet_stake_allowance": period.subnet_stake_allowance,
             "manual_adjustments": period.manual_allowance,
             "total_monthly_allowance": period.total_allowance,
             "used_tokens": period.used_tokens,
@@ -260,12 +270,20 @@ class UsageService:
         stripe_allowance = await self._stripe_allowance(active_subscription)
         ethereum_allowance = await self._latest_crypto_allowance(user.id, "ethereum", "erc20")
         substrate_allowance = await self._latest_crypto_allowance(user.id, "substrate_evm", "native")
+        subnet_stake_allowance = await self._latest_crypto_allowance(user.id, "hypertensor", "subnet_stake")
         manual_allowance = await self._manual_allowance(user.id, period_start, period_end)
         used_tokens = await self._period_used_tokens(period.id)
-        total_allowance = stripe_allowance + ethereum_allowance + substrate_allowance + manual_allowance
+        total_allowance = (
+            stripe_allowance
+            + ethereum_allowance
+            + substrate_allowance
+            + subnet_stake_allowance
+            + manual_allowance
+        )
         period.stripe_allowance = stripe_allowance
         period.ethereum_erc20_allowance = ethereum_allowance
         period.substrate_native_allowance = substrate_allowance
+        period.subnet_stake_allowance = subnet_stake_allowance
         period.manual_allowance = manual_allowance
         period.total_allowance = total_allowance
         period.used_tokens = used_tokens
@@ -291,6 +309,8 @@ class UsageService:
             )
         if settings.token_reset_mode == "calendar_month":
             start, end = _calendar_month_period(utcnow())
+        elif settings.token_reset_mode == "weekly":
+            start, end = _weekly_period(utcnow())
         else:
             start, end = _account_creation_period(user.created_at, utcnow())
         return start, end, None

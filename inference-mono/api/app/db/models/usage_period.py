@@ -31,6 +31,7 @@ class UsagePeriod(Base):
     stripe_allowance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     ethereum_erc20_allowance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     substrate_native_allowance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    subnet_stake_allowance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False, server_default="0")
     manual_allowance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     total_allowance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     used_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)

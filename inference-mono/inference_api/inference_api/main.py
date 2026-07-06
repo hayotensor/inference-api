@@ -30,8 +30,11 @@ async def lifespan(app: FastAPI):
         except Exception:  # noqa: BLE001 - redis optional; loops fall back to asyncio locks
             redis_client = None
         provisioner_loop = ProvisionerLoop(redis_client=redis_client)
-        maintenance_loop = MaintenanceLoop()
         provisioner_loop.start()
+    # The maintenance loop also drives the subnet-stake allowance refresh, so it
+    # must run whenever either the provisioner or the stake quota is enabled.
+    if settings.provisioner_enabled or settings.subnet_stake_quota_enabled:
+        maintenance_loop = MaintenanceLoop()
         maintenance_loop.start()
     try:
         yield

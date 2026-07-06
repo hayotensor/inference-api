@@ -158,11 +158,34 @@ class CryptoBalanceSnapshot(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False)
+    # wallet_address / raw_balance / normalized_balance are NOT NULL in the real
+    # (main-API-owned) table; the serving plane now WRITES subnet_stake snapshots
+    # (maintenance refresh), so the mirror must carry them to produce valid rows.
+    wallet_address: Mapped[str] = mapped_column(String(42), index=True, nullable=False)
     chain: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     token_type: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    raw_balance: Mapped[str] = mapped_column(String(128), nullable=False)
+    normalized_balance: Mapped[Decimal] = mapped_column(Numeric(48, 18), nullable=False)
     inference_token_allowance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     error_message: Mapped[str | None] = mapped_column(String(512))
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True, nullable=False)
+
+
+class EVMWallet(Base):
+    """Read-only mirror of the main API's evm_wallets (owned by Alembic there).
+
+    The serving plane needs a wallet's address to look up its subnet stake in the
+    ht-indexer; the main API never exposes it here, so we mirror the columns we
+    read. See the "every table is defined twice" note in the project memory.
+    """
+
+    __tablename__ = "evm_wallets"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id"), unique=True, index=True
+    )
+    address: Mapped[str] = mapped_column(String(42), index=True, nullable=False)
 
 
 class ManualTokenAdjustment(Base):
@@ -197,6 +220,7 @@ class UsagePeriod(Base):
     stripe_allowance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     ethereum_erc20_allowance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     substrate_native_allowance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    subnet_stake_allowance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     manual_allowance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     total_allowance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     used_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)

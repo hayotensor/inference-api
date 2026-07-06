@@ -88,10 +88,15 @@ class Settings(BaseSettings):
     substrate_evm_rpc_url: str | None = None
     substrate_native_decimals: int = Field(default=18, ge=0, le=36)
 
-    token_reset_mode: Literal["account_creation", "calendar_month"] = "account_creation"
+    token_reset_mode: Literal["account_creation", "calendar_month", "weekly"] = "account_creation"
     token_reset_day: int = Field(default=1, ge=1, le=28)
+    token_reset_weekday: int = Field(default=0, ge=0, le=6)  # 0 = Monday (weekly mode anchor)
     free_monthly_token_allowance: int = Field(default=0, ge=0)
     wallet_nonce_ttl_seconds: int = Field(default=600, ge=60, le=3600)
+
+    # Subnet-stake weekly quota (reporting parity; the indexer read + enforcement
+    # live in the inference service). See inference_api.ht_indexer.
+    subnet_stake_quota_enabled: bool = False
 
     @field_validator("cors_origins", "allowed_hosts", mode="before")
     @classmethod
