@@ -2,21 +2,39 @@
 
 Eligibility: ``attested`` + ``healthy`` miners that host the requested model
 (loaded) AND have an ``active`` provisioned token. Ranking: least-loaded first
-(capacity.available_concurrent_requests desc, then queue_depth asc), a simple
-reputation tie-break, and a small random jitter so equally-ranked miners share
-load instead of stampeding the first one.
+(capacity.available_concurrent_requests desc, then queue_depth asc), a
+platform-observed reputation tie-break, and a small random jitter so
+equally-ranked miners share load instead of stampeding the first one.
+
+``available_concurrent_requests``/``queue_depth`` come off the miner's
+self-reported ``capacity`` (bounded again here, defensively, on read — see
+``_capacity_int``; ``miners.service._sanitize_capacity`` already bounds them
+on write, but this re-clamps in case a row was written before that guard
+existed, or by any other path). ``reputation`` is NOT taken from
+self-reported capacity at all: a miner has no business grading itself, so it
+is computed here from the platform's OWN observations
+(``stats_recorder``-authored ``MinerRequestStat`` rows — success/failure of
+attempts THIS platform actually forwarded) via ``_platform_reputation``. See
+that function for the (intentionally small — this is not a full reputation
+system) scoring rule.
 """
 
 from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from inference_api.models import Miner, MinerModel, ProvisionedToken
-from inference_api.miners.service import HEALTHY
+from inference_api.models import Miner, MinerModel, MinerRequestStat, ProvisionedToken
+from inference_api.miners.service import (
+    HEALTHY,
+    MAX_AVAILABLE_CONCURRENT_REQUESTS,
+    MAX_QUEUE_DEPTH,
+)
+from inference_api.security import utcnow
 
 
 @dataclass(frozen=True)
@@ -24,6 +42,10 @@ class MinerCandidate:
     miner_id: object
     miner_model_id: object
     hotkey: str
+    # Carried so a recorded attempt (and the epoch snapshot built from it) can name
+    # the on-chain node without a second lookup. May be None for a miner that
+    # registered without chain gating.
+    subnet_node_id: int | None
     model_id: str
     model_version: str | None
     tee_endpoint: str
@@ -43,20 +65,73 @@ class MinerCandidate:
         )
 
 
-def _capacity_int(capacity: dict, key: str, default: int) -> int:
+def _capacity_int(capacity: dict, key: str, default: int, *, minimum: int, maximum: int) -> int:
+    """Read ``key`` off self-reported ``capacity``, clamped to ``[minimum, maximum]``.
+
+    Defensive, read-side re-clamp: ``miners.service._sanitize_capacity`` already
+    bounds these on write, but re-checking here means a row written before that
+    guard existed (or by any other path) can't out-rank everyone else by
+    self-reporting e.g. ``available_concurrent_requests: 999999`` or a negative
+    ``queue_depth``.
+    """
     value = (capacity or {}).get(key, default)
     try:
-        return int(value)
+        value = int(value)
     except (TypeError, ValueError):
         return default
+    return max(minimum, min(value, maximum))
 
 
-def _reputation(capacity: dict) -> float:
-    value = (capacity or {}).get("reputation", 1.0)
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 1.0
+# Mirrors inference_api.routing.forwarder.OUTCOME_SUCCESS. Not imported from
+# there directly: forwarder imports MinerCandidate FROM this module, so an
+# import the other way would be circular.
+_OUTCOME_SUCCESS = "success"
+
+# Reputation scoring window / bootstrap threshold. Deliberately simple (a flat
+# success ratio, no recency weighting/decay) — this is not a full reputation
+# system, just enough that self-reported reputation stops being a free win.
+_REPUTATION_LOOKBACK = timedelta(hours=1)
+_REPUTATION_MIN_SAMPLES = 3
+_REPUTATION_NEUTRAL = 1.0
+
+
+async def _platform_reputation(
+    session: AsyncSession, miner_ids: set, *, now=None
+) -> dict:
+    """Recent success-rate per miner_id, from the platform's OWN forward
+    attempts (``stats_recorder``-authored ``MinerRequestStat`` rows) — the
+    platform selected and forwarded these requests itself, so this is a
+    first-hand measurement, never anything the miner self-reports.
+
+    A miner with fewer than ``_REPUTATION_MIN_SAMPLES`` recent rows gets the
+    neutral score: a brand-new (or rarely-used) miner should not be penalized
+    for lack of evidence, only a miner with an observed track record of
+    failures should rank behind one without.
+    """
+    if not miner_ids:
+        return {}
+    cutoff = (now or utcnow()) - _REPUTATION_LOOKBACK
+    statement = (
+        select(
+            MinerRequestStat.miner_id,
+            func.count().label("total"),
+            func.sum(
+                case((MinerRequestStat.outcome == _OUTCOME_SUCCESS, 1), else_=0)
+            ).label("successes"),
+        )
+        .where(
+            MinerRequestStat.miner_id.in_(miner_ids),
+            MinerRequestStat.created_at >= cutoff,
+        )
+        .group_by(MinerRequestStat.miner_id)
+    )
+    result = await session.execute(statement)
+    scores: dict = {}
+    for miner_id, total, successes in result.all():
+        if not total or total < _REPUTATION_MIN_SAMPLES:
+            continue
+        scores[miner_id] = (successes or 0) / total
+    return scores
 
 
 class MinerSelector:
@@ -82,9 +157,14 @@ class MinerSelector:
             )
         )
         result = await self.session.execute(statement)
+        rows = result.all()
+        reputation_by_miner = await _platform_reputation(
+            self.session, {miner.id for miner, _mm in rows}
+        )
+
         candidates: list[MinerCandidate] = []
         seen: set = set()
-        for miner, mm in result.all():
+        for miner, mm in rows:
             if mm.id in seen:
                 continue
             seen.add(mm.id)
@@ -94,16 +174,23 @@ class MinerSelector:
                     miner_id=miner.id,
                     miner_model_id=mm.id,
                     hotkey=miner.hotkey,
+                    subnet_node_id=miner.subnet_node_id,
                     model_id=mm.model_id,
                     model_version=mm.model_version,
                     tee_endpoint=mm.tee_endpoint or miner.tee_endpoint,
                     tls_cert_fingerprint=mm.tls_cert_fingerprint or miner.tls_cert_fingerprint,
                     model_hash=mm.model_hash,
                     available_concurrent_requests=_capacity_int(
-                        capacity, "available_concurrent_requests", 1
+                        capacity,
+                        "available_concurrent_requests",
+                        1,
+                        minimum=0,
+                        maximum=MAX_AVAILABLE_CONCURRENT_REQUESTS,
                     ),
-                    queue_depth=_capacity_int(capacity, "queue_depth", 0),
-                    reputation=_reputation(capacity),
+                    queue_depth=_capacity_int(
+                        capacity, "queue_depth", 0, minimum=0, maximum=MAX_QUEUE_DEPTH
+                    ),
+                    reputation=reputation_by_miner.get(miner.id, _REPUTATION_NEUTRAL),
                 )
             )
         # Shuffle first so ties (identical sort_key) break randomly (jitter), then

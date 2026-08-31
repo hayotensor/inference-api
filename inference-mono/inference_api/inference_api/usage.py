@@ -295,7 +295,12 @@ class UsageService:
             start, end = _weekly_period(utcnow())
         else:
             start, end = _account_creation_period(user.created_at, utcnow())
-        return start, end, None
+        # Only the period *window* falls back here. Dropping the subscription too
+        # would grant a paying customer the free allowance (and refuse their paid
+        # traffic) whenever Stripe sends a subscription without period bounds —
+        # they live on the subscription item in newer API versions. Mirrors
+        # ../api/app/usage/service.py.
+        return start, end, active_subscription
 
     async def _active_subscription(self, user_id: uuid.UUID) -> UserSubscription | None:
         result = await self.session.execute(

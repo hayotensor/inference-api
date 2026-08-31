@@ -11,6 +11,7 @@ from app.db.models.evm_wallet import EVMWallet
 from app.db.models.inference_usage_event import InferenceUsageEvent
 from app.db.models.manual_token_adjustment import ManualTokenAdjustment
 from app.db.models.miner import Miner, MinerModel, ProvisionedToken
+from app.db.models.miner_stats import MinerEpochSnapshot, MinerEpochStat, MinerRequestStat
 from app.db.models.model_allowlist import ModelAllowlist
 from app.db.models.model_pricing import ModelPricing
 from app.db.models.oauth_account import OAuthAccount
@@ -41,6 +42,9 @@ __all__ = [
     "ManualTokenAdjustment",
     "Miner",
     "MinerModel",
+    "MinerEpochSnapshot",
+    "MinerEpochStat",
+    "MinerRequestStat",
     "ProvisionedToken",
     "ModelAllowlist",
     "ModelPricing",

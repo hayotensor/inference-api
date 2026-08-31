@@ -569,12 +569,21 @@ class AdminService:
         self, context: AdminContext, payload: AdminBillingPlanCreate, request: Request
     ) -> AdminBillingPlanRead:
         slug = _slugify(payload.slug or payload.name)
-        await self._ensure_unique_billing_plan(slug=slug, name=payload.name, stripe_price_id=payload.stripe_price_id)
+        await self._ensure_unique_billing_plan(
+            slug=slug,
+            name=payload.name,
+            stripe_price_id=payload.stripe_price_id,
+            stripe_annual_price_id=payload.stripe_annual_price_id,
+        )
         plan = BillingPlan(
             slug=slug,
             name=payload.name,
             description=payload.description,
             stripe_price_id=payload.stripe_price_id,
+            stripe_annual_price_id=payload.stripe_annual_price_id,
+            price_cents=payload.price_cents,
+            annual_price_cents=payload.annual_price_cents,
+            currency=payload.currency,
             monthly_token_allowance=payload.monthly_token_allowance,
             active=payload.active,
             visible=payload.visible,
@@ -607,6 +616,7 @@ class AdminService:
             slug=slug,
             name=update_data.get("name"),
             stripe_price_id=update_data.get("stripe_price_id"),
+            stripe_annual_price_id=update_data.get("stripe_annual_price_id"),
             exclude_id=plan.id,
         )
         if slug is not None:
@@ -615,6 +625,10 @@ class AdminService:
             "name",
             "description",
             "stripe_price_id",
+            "stripe_annual_price_id",
+            "price_cents",
+            "annual_price_cents",
+            "currency",
             "monthly_token_allowance",
             "active",
             "visible",
@@ -1196,6 +1210,7 @@ class AdminService:
         slug: str | None,
         name: str | None,
         stripe_price_id: str | None,
+        stripe_annual_price_id: str | None = None,
         exclude_id: uuid.UUID | None = None,
     ) -> None:
         checks = []
@@ -1203,8 +1218,10 @@ class AdminService:
             checks.append(BillingPlan.slug == slug)
         if name:
             checks.append(BillingPlan.name == name)
-        if stripe_price_id:
-            checks.append(BillingPlan.stripe_price_id == stripe_price_id)
+        for price_id in (stripe_price_id, stripe_annual_price_id):
+            if price_id:
+                checks.append(BillingPlan.stripe_price_id == price_id)
+                checks.append(BillingPlan.stripe_annual_price_id == price_id)
         if not checks:
             return
         statement = select(BillingPlan).where(or_(*checks)).limit(1)

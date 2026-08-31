@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "talaris-attestation-verifier"
+version = "0.1.0"
+description = "Shared, security-critical attestation verifier for the Talaris system (counterpart to the TEE container's attestation producer)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "Talaris" }]
+dependencies = [
+    "cryptography>=41",
+    "pynacl>=1.5",
+    "httpx>=0.24",
+]
+
+[project.optional-dependencies]
+# Real NVIDIA local attestation via the NVIDIA attestation SDK. Heavy / hardware-tied;
+# the nvidia_local backend imports it lazily and only when selected.
+nvidia-local = ["nv-attestation-sdk"]
+# Intel DCAP / PCS quote-verification. The intel_pcs backend's full ECDSA-P256 DCAP
+# signature-chain verification (quote sig, QE report sig, att-key binding, PCK chain to
+# the pinned Intel SGX Root CA, and Intel-signed TCB info + QE identity collateral) is
+# implemented in PURE `cryptography` — NO native DCAP libs are required. This extra is
+# now empty; it remains only as a stable name for downstream pins. (httpx, used by the
+# default PCS transport, is already a core dependency.)
+intel-dcap = []
+# Test / dev tooling.
+dev = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "live: tests that hit the live Intel PCS over the network (skipped if unreachable)",
+]

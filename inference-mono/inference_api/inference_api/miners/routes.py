@@ -5,8 +5,15 @@ Two-layer auth on POST /miners/register:
   2. the hotkey self-registration signature, verified ONLY via
      ``talaris_contracts.verify_registration_signature`` (single source of truth).
 
-After both pass, the nonce is replay-guarded, the chain class is (optionally)
-checked, and the miner + its model inventory are upserted.
+After both pass, the endpoint is SSRF-checked, the nonce is replay-guarded,
+the chain class is (optionally) checked, and the miner + its model inventory
+are upserted — and the calling service-client is BOUND to that miner
+(``miners.auth.bind_client_to_miner``).
+
+Every OTHER miner-scoped route (heartbeat, ``/me``) enforces that binding via
+``miners.auth.require_bound_miner`` — ``current_miner_client`` alone only
+proves "some valid miner-role token", not WHICH miner the caller may act as.
+See ``miners.auth`` for the full trust-model writeup.
 """
 
 from __future__ import annotations
@@ -18,6 +25,7 @@ from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from talaris_contracts import registration_miner_hash, verify_registration_signature
+from talaris_contracts.registration import TeeEndpointError, validate_tee_endpoint
 
 from inference_api.chain import (
     ChainClient,
@@ -28,8 +36,12 @@ from inference_api.chain import (
 )
 from inference_api.config import settings
 from inference_api.db import get_async_session
-from inference_api.errors import forbidden, service_unavailable, unauthorized
-from inference_api.miners.auth import current_miner_client
+from inference_api.errors import bad_request, forbidden, service_unavailable, unauthorized
+from inference_api.miners.auth import (
+    bind_client_to_miner,
+    current_miner_client,
+    require_bound_miner,
+)
 from inference_api.miners.replay import claim_registration_nonce
 from inference_api.miners.schemas import (
     MinerHeartbeat,
@@ -109,6 +121,19 @@ async def register_miner(
     if not verify_registration_signature(reg, key_type=settings.registration_key_type):
         raise unauthorized("Invalid self-registration signature")
 
+    # SSRF guard: reject an endpoint the platform must not dial (cloud metadata,
+    # loopback/private ranges in production, etc.) BEFORE it is ever persisted or
+    # provisioned. Same check applies to each per-model advertised endpoint, since
+    # the provisioner dials those too. See talaris_contracts.registration for the
+    # policy and its app_env-derived / operator-opt-in default.
+    try:
+        validate_tee_endpoint(reg.tee_endpoint, app_env=settings.app_env)
+        for hosted_model in reg.hosted_models:
+            if hosted_model.tee_endpoint:
+                validate_tee_endpoint(hosted_model.tee_endpoint, app_env=settings.app_env)
+    except TeeEndpointError as exc:
+        raise bad_request("unsafe_tee_endpoint", str(exc)) from exc
+
     # Replay guard on the registration nonce.
     if not await claim_registration_nonce(reg.hotkey, reg.nonce, redis_client):
         raise unauthorized("Registration nonce already used")
@@ -124,6 +149,10 @@ async def register_miner(
     )
     models = await registry.models_for_miner(miner.id)
     await session.commit()
+    # Bind this (already hotkey-signature-verified) service-client to the miner
+    # it just registered, so heartbeat/`/me` calls from it are authorized for
+    # THIS miner only. See miners.auth for the trust-model writeup.
+    await bind_client_to_miner(redis_client, miner_client.id, miner.id)
     return MinerRegistrationResponse(
         miner_id=miner.id,
         hotkey=miner.hotkey,
@@ -143,11 +172,16 @@ async def miner_heartbeat(
     payload: MinerHeartbeat,
     session: AsyncSession = Depends(get_async_session),
     miner_client: ServiceClient = Depends(current_miner_client),
+    redis_client: redis.Redis = Depends(get_redis),
 ) -> MinerSelfView:
     registry = MinerRegistryService(session)
     miner = await registry.get(miner_id)
     if miner is None:
         raise unauthorized("Unknown miner")
+    # Ownership check: this service-client must be the one that registered
+    # THIS miner (see miners.auth) — otherwise any miner-role token could
+    # heartbeat (and so mutate health/capacity for) an unrelated miner.
+    await require_bound_miner(redis_client, client_id=miner_client.id, miner_id=miner.id)
     health = health_from_registration_health(payload.health)
     await registry.record_heartbeat(miner, health=health, capacity=payload.capacity)
     models = await registry.models_for_miner(miner.id)
@@ -160,10 +194,15 @@ async def miner_me(
     hotkey: str,
     session: AsyncSession = Depends(get_async_session),
     miner_client: ServiceClient = Depends(current_miner_client),
+    redis_client: redis.Redis = Depends(get_redis),
 ) -> MinerSelfView:
     registry = MinerRegistryService(session)
     miner = await registry.get_by_hotkey(hotkey)
     if miner is None:
         raise unauthorized("Unknown miner")
+    # Ownership check: this service-client must be the one that registered
+    # THIS miner (see miners.auth) — otherwise any miner-role token could read
+    # another miner's private state (enclave_verify_key, tee_endpoint, ...).
+    await require_bound_miner(redis_client, client_id=miner_client.id, miner_id=miner.id)
     models = await registry.models_for_miner(miner.id)
     return _self_view(miner, models)

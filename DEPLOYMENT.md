@@ -222,6 +222,7 @@ export API_DOMAIN='api.example.com'
 export INFERENCE_API_DOMAIN='inference.example.com'
 export PHONE_USER_EMAIL_DOMAIN='phone-users.example.com'
 export NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=''
+export NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=''   # pk_live_... (publishable key only)
 export MESH_ROUTER_URL=''
 
 python3 - <<'PY'
@@ -256,6 +257,7 @@ api_domain = clean_host(os.environ["API_DOMAIN"])
 inference_api_domain = clean_host(os.environ["INFERENCE_API_DOMAIN"])
 phone_domain = clean_host(os.environ["PHONE_USER_EMAIL_DOMAIN"])
 walletconnect_project_id = os.environ.get("NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID", "")
+stripe_publishable_key = os.environ.get("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "")
 mesh_router_url = os.environ.get("MESH_ROUTER_URL", "")
 
 api_dir = clean_dir("API_DIR", "inference-mono/api")
@@ -280,6 +282,7 @@ Path(".env.production").write_text(
             f"NEXT_PUBLIC_API_BASE_URL=https://{api_domain}",
             f"NEXT_PUBLIC_INFERENCE_API_BASE_URL=https://{inference_api_domain}",
             f"NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID={walletconnect_project_id}",
+            f"NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY={stripe_publishable_key}",
             "",
         ]
     )
@@ -333,13 +336,18 @@ Path(".env.production").write_text(
             "OTP_MAX_ATTEMPTS=5",
             "API_KEY_DEFAULT_RATE_LIMIT_PER_MINUTE=120",
             "STRIPE_SECRET_KEY=",
+            "STRIPE_PUBLISHABLE_KEY=",
             "STRIPE_WEBHOOK_SECRET=",
+            "STRIPE_PORTAL_CONFIGURATION_ID=",
             f"STRIPE_SUCCESS_URL=https://{app_domain}/billing/success",
             f"STRIPE_CANCEL_URL=https://{app_domain}/billing/cancel",
             f"STRIPE_CUSTOMER_PORTAL_RETURN_URL=https://{app_domain}/dashboard/billing",
             "STRIPE_STARTER_PRICE_ID=",
             "STRIPE_PRO_PRICE_ID=",
             "STRIPE_BUSINESS_PRICE_ID=",
+            "STRIPE_STARTER_ANNUAL_PRICE_ID=",
+            "STRIPE_PRO_ANNUAL_PRICE_ID=",
+            "STRIPE_BUSINESS_ANNUAL_PRICE_ID=",
             "ETHEREUM_RPC_URL=",
             "ETHEREUM_ERC20_CONTRACT_ADDRESS=",
             "ETHEREUM_ERC20_DECIMALS=18",
@@ -388,6 +396,46 @@ PY
 ```
 
 For production users, edit the generated env files before launch and configure real email/SMS/Stripe/OAuth settings. The generator uses console email/SMS so the services can boot without third-party accounts.
+
+#### Signup email
+
+`EMAIL_PROVIDER=console` only logs the verification link, so nobody can complete a
+signup they did not run themselves. Real signup email needs an actual sender:
+
+**Cloudflare cannot send it.** Email Routing is inbound-only — it receives mail for
+your domain and forwards it. The Email Workers `send_email` binding sends only to
+addresses already verified as *destinations* on that zone, so it cannot mail a
+stranger who just registered. Cloudflare's role here is DNS (SPF/DKIM/DMARC) and,
+if you want it, inbound handling for the `From:` address.
+
+**Send from a dedicated subdomain**, not the apex. Resend (like most ESPs) publishes
+its DKIM key at a fixed selector — `resend._domainkey.<domain>` — so verifying an
+apex that another account has already verified silently *overwrites* that record and
+breaks the other sender. Registering `talaris.example.com` instead scopes every
+record under it (`resend._domainkey.talaris`, `send.talaris`), so nothing collides.
+It also keeps the app's sending reputation separate from corporate mail: a spam
+complaint against signup email cannot degrade the apex domain other systems send from.
+
+With `EMAIL_PROVIDER=resend`:
+
+```
+EMAIL_PROVIDER=resend
+EMAIL_FROM=noreply@<your-domain>
+RESEND_API_KEY=re_...
+AUTO_VERIFY_NEW_USERS=false
+```
+
+`AUTO_VERIFY_NEW_USERS=true` marks every new account verified and sends **nothing** —
+leave it on and "real signup email" is a no-op. It must be off for the round-trip to
+mean anything.
+
+Enabling Email Routing is a zone-level action that rewrites the apex MX. If the
+domain already receives mail elsewhere (Microsoft 365, Google Workspace), that will
+break it — snapshot the MX records first.
+
+A delivery failure no longer 500s the signup form: the account and its token are
+already committed, so the send is best-effort and logged
+(`auth.verification_email_failed`), and `POST /auth/request-verify-email` re-sends.
 
 ### 4. Start The Stack
 
@@ -480,10 +528,28 @@ Main API settings in `${API_DIR}/.env`:
 
 - Google OAuth callback: `https://${API_DOMAIN}/auth/google/callback`
 - Apple OAuth callback: `https://${API_DOMAIN}/auth/apple/callback`
-- Stripe webhook endpoint: `https://${API_DOMAIN}/billing/webhook`
+- Stripe webhook endpoint: `https://${API_DOMAIN}/billing/stripe/webhook`
 - Stripe success URL: `https://${APP_DOMAIN}/billing/success`
 - Stripe cancel URL: `https://${APP_DOMAIN}/billing/cancel`
 - Stripe customer portal return URL: `https://${APP_DOMAIN}/dashboard/billing`
+
+Products, prices, and the customer-portal configuration are created from the plan
+catalog in `inference-mono/api/app/billing/plans.py`. With `STRIPE_SECRET_KEY` set
+in `${API_DIR}/.env`, run the sync script and let it write the IDs back:
+
+```bash
+cd /opt/inference-system/inference-mono/api
+
+python scripts/stripe_sync_plans.py --dry-run     # show what it would create
+python scripts/stripe_sync_plans.py --write-env \
+  --webhook-url "https://${API_DOMAIN}/billing/stripe/webhook"
+```
+
+It is idempotent: products are matched by their `talaris_plan_slug` metadata and
+prices by (interval, currency, amount), so re-running changes nothing. The
+webhook signing secret is only returned when the endpoint is created — the script
+writes it to `STRIPE_WEBHOOK_SECRET` on that run. Restart the API afterwards; the
+plan seeder picks up the new price IDs on the next `/billing/plans` call.
 
 Inference API settings in `${INFERENCE_API_DIR}/.env`:
 
@@ -497,6 +563,7 @@ UI settings in `.env.production`:
 - `NEXT_PUBLIC_API_BASE_URL`
 - `NEXT_PUBLIC_INFERENCE_API_BASE_URL`
 - `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`
+- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
 
 The UI reads `NEXT_PUBLIC_*` values at build time. Rebuild the UI after changing `.env.production`.
 

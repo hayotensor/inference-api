@@ -35,3 +35,18 @@ async def current_router_client(
     )
     request.state.service_client = client
     return client
+
+
+async def current_edge_client(
+    request: Request,
+    raw_token: str = Depends(raw_service_token_from_request),
+    session: AsyncSession = Depends(get_async_session),
+    redis_client: redis.Redis = Depends(get_redis),
+) -> ServiceClient:
+    client = await ServiceClientService(session).authenticate_token(
+        raw_token,
+        redis_client,
+        required_role=ServiceClientRole.edge,
+    )
+    request.state.service_client = client
+    return client

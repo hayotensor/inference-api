@@ -15,6 +15,16 @@ class UserService:
         self.user_manager = user_manager
 
     async def update_me(self, user: User, payload: UserUpdate, request: Request) -> User:
+        if (
+            payload.email is not None
+            and payload.email.lower() != user.email.lower()
+            and user.oauth_accounts
+        ):
+            raise bad_request(
+                "email_locked_to_oauth",
+                "Your email is managed by your linked sign-in provider "
+                f"({', '.join(user.oauth_providers)}) and can't be changed here.",
+            )
         try:
             updated = await self.user_manager.update(payload, user, safe=True, request=request)
         except UserAlreadyExists as exc:

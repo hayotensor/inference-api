@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Loader2, Mail, Phone, Save, Trash2, Unlink } from "lucide-react";
+import { Loader2, Mail, Save, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
+import { AdminConfirmDialog } from "@/components/admin-common";
 import { DashboardPageHeader } from "@/components/dashboard-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,15 +32,12 @@ const profileSchema = z.object({
   email: z.string().email().optional()
 });
 
-const phoneSchema = z.object({
-  phone_number: z.string().min(8, "Phone number is required"),
-  code: z.string().length(6, "Code must be 6 digits").optional()
-});
-
 export default function SettingsPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { user, refreshUser, logout } = useAuth();
+  const { user, setUser, logout } = useAuth();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const oauthLocked = Boolean(user?.oauth_providers.length);
   const profileForm = useForm<z.infer<typeof profileSchema>>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
@@ -47,31 +45,22 @@ export default function SettingsPage() {
       email: user?.email ?? ""
     }
   });
-  const phoneForm = useForm<z.infer<typeof phoneSchema>>({
-    resolver: zodResolver(phoneSchema),
-    defaultValues: {
-      phone_number: user?.phone_number ?? "",
-      code: ""
-    }
-  });
-
   useEffect(() => {
     if (!user) return;
     profileForm.reset({
       full_name: user.full_name ?? "",
       email: user.email
     });
-    phoneForm.reset({
-      phone_number: user.phone_number ?? "",
-      code: ""
-    });
-  }, [phoneForm, profileForm, user]);
+  }, [profileForm, user]);
 
   const updateMutation = useMutation({
     mutationFn: userApi.update,
-    onSuccess: async () => {
+    // Trust the PATCH response itself -- it is the server's own record of
+    // what was just saved -- instead of re-fetching (which could race with
+    // a stale cache read and show the user their edit was "lost").
+    onSuccess: (data) => {
       toast.success("Profile updated");
-      await refreshUser();
+      setUser(data);
     },
     onError: (error) => toast.error(apiErrorMessage(error))
   });
@@ -82,35 +71,11 @@ export default function SettingsPage() {
     onError: (error) => toast.error(apiErrorMessage(error))
   });
 
-  const requestPhoneMutation = useMutation({
-    mutationFn: (phone_number: string) =>
-      authApi.requestPhoneOtp({ phone_number, purpose: "link" }),
-    onSuccess: (response) => toast.success(response.detail),
-    onError: (error) => toast.error(apiErrorMessage(error))
-  });
-
-  const linkPhoneMutation = useMutation({
-    mutationFn: authApi.linkPhone,
-    onSuccess: async () => {
-      toast.success("Phone linked");
-      await refreshUser();
-    },
-    onError: (error) => toast.error(apiErrorMessage(error))
-  });
-
-  const unlinkPhoneMutation = useMutation({
-    mutationFn: authApi.unlinkPhone,
-    onSuccess: async () => {
-      toast.success("Phone unlinked");
-      await refreshUser();
-    },
-    onError: (error) => toast.error(apiErrorMessage(error))
-  });
-
   const deleteMutation = useMutation({
     mutationFn: userApi.delete,
     onSuccess: async () => {
       toast.success("Account deleted");
+      setConfirmingDelete(false);
       await logout();
       queryClient.clear();
       router.replace("/");
@@ -125,7 +90,7 @@ export default function SettingsPage() {
         description="Account updates are sent to the existing user and auth endpoints."
       />
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_0.9fr]">
+      <div className="grid gap-4 lg:max-w-2xl">
         <Card>
           <CardHeader>
             <CardTitle>Profile</CardTitle>
@@ -143,7 +108,17 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
-                  <Input id="email" type="email" {...profileForm.register("email")} />
+                  <Input
+                    id="email"
+                    type="email"
+                    {...profileForm.register("email", { disabled: oauthLocked })}
+                  />
+                  {oauthLocked ? (
+                    <p className="text-xs text-muted-foreground">
+                      Managed by your {user?.oauth_providers.join(", ")} sign-in and can&apos;t be
+                      changed here.
+                    </p>
+                  ) : null}
                 </div>
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
@@ -183,70 +158,6 @@ export default function SettingsPage() {
             </div>
           </CardContent>
         </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Phone</CardTitle>
-            <CardDescription>Request and verify OTP codes through backend phone auth.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form
-              className="space-y-4"
-              onSubmit={phoneForm.handleSubmit((values) =>
-                linkPhoneMutation.mutate({
-                  phone_number: values.phone_number,
-                  code: values.code ?? ""
-                })
-              )}
-            >
-              <div className="space-y-2">
-                <Label htmlFor="phone_number">Phone number</Label>
-                <Input id="phone_number" type="tel" {...phoneForm.register("phone_number")} />
-              </div>
-              <Button
-                className="w-full"
-                type="button"
-                variant="outline"
-                disabled={requestPhoneMutation.isPending}
-                onClick={() => requestPhoneMutation.mutate(phoneForm.getValues("phone_number"))}
-              >
-                {requestPhoneMutation.isPending ? (
-                  <Loader2 className="animate-spin" />
-                ) : (
-                  <Phone />
-                )}
-                Send link OTP
-              </Button>
-              <div className="space-y-2">
-                <Label htmlFor="code">OTP code</Label>
-                <Input id="code" inputMode="numeric" {...phoneForm.register("code")} />
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <Button type="submit" disabled={linkPhoneMutation.isPending}>
-                  {linkPhoneMutation.isPending ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <Phone />
-                  )}
-                  Link phone
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={!user?.phone_number || unlinkPhoneMutation.isPending}
-                  onClick={() => unlinkPhoneMutation.mutate()}
-                >
-                  {unlinkPhoneMutation.isPending ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <Unlink />
-                  )}
-                  Unlink
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
       </div>
 
       <Card className="mt-4 border-destructive/30">
@@ -258,17 +169,23 @@ export default function SettingsPage() {
           <Button
             variant="destructive"
             disabled={deleteMutation.isPending}
-            onClick={() => {
-              if (window.confirm("Delete this account? This cannot be undone.")) {
-                deleteMutation.mutate();
-              }
-            }}
+            onClick={() => setConfirmingDelete(true)}
           >
             {deleteMutation.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
             Delete account
           </Button>
         </CardContent>
       </Card>
+
+      <AdminConfirmDialog
+        open={confirmingDelete}
+        onOpenChange={setConfirmingDelete}
+        title="Delete this account?"
+        description="This permanently deletes your account and cannot be undone."
+        confirmLabel="Delete account"
+        pending={deleteMutation.isPending}
+        onConfirm={() => deleteMutation.mutate()}
+      />
     </>
   );
 }

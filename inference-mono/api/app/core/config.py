@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     app_env: Literal["local", "test", "production"] = "local"
     debug: bool = False
     api_base_url: AnyHttpUrl | str = "http://localhost:8000"
+    # Public base URL of the user-facing frontend (dashboard + /chat). Used for
+    # email links, the SIWE message domain/URI, and SSO.
+    app_url: AnyHttpUrl | str = "http://localhost:3000"
 
     database_url: str = "postgresql+asyncpg://inference:inference@postgres:5432/inference"
     redis_url: str = "redis://redis:6379/0"
@@ -32,6 +35,12 @@ class Settings(BaseSettings):
     jwt_audience: str = "fastapi-users:auth"
     jwt_lifetime_seconds: int = 900
     refresh_token_lifetime_days: int = 30
+
+    # SSO cookie token: a medium-TTL JWT the edge Worker verifies (shared secret)
+    # to identify the logged-in user when routing to the /chat surface.
+    sso_secret: SecretStr = Field(default=SecretStr("change-me-in-env"))
+    sso_audience: str = "talaris:sso"
+    sso_ttl_seconds: int = Field(default=28_800, ge=300, le=604_800)
     verification_token_secret: SecretStr = Field(default=SecretStr("change-me-in-env"))
     reset_password_token_secret: SecretStr = Field(default=SecretStr("change-me-in-env"))
     oauth_state_secret: SecretStr = Field(default=SecretStr("change-me-in-env"))
@@ -42,10 +51,33 @@ class Settings(BaseSettings):
     allowed_hosts: Annotated[list[str], NoDecode] = ["localhost", "127.0.0.1", "testserver"]
     request_id_header: str = "X-Request-ID"
 
+    # Reverse-proxy trust for client-IP determination (rate limiting, audit
+    # logging). Entries are literal IPs or CIDR networks for hops that are
+    # allowed to set X-Forwarded-For with a truthful value (e.g. the
+    # cloudflared/tunnel container's docker-network address in production).
+    # SAFE DEFAULT: empty, meaning X-Forwarded-For is never trusted and the
+    # socket peer is used verbatim -- this is deliberately fail-closed so an
+    # unconfigured deployment cannot be tricked by a client-supplied header.
+    # See app/core/rate_limit.py:ClientIPMiddleware for how this interacts
+    # with uvicorn's own --forwarded-allow-ips/FORWARDED_ALLOW_IPS handling.
+    trusted_proxy_ips: Annotated[list[str], NoDecode] = []
+
     google_client_id: str | None = None
     google_client_secret: SecretStr | None = None
     apple_client_id: str | None = None
     apple_client_secret: SecretStr | None = None
+
+    # Mark new accounts email-verified at registration and skip sending the
+    # verification email entirely. Intended for local development and demos,
+    # where there is no real mailbox and the verification link would otherwise
+    # have to be dug out of the console log. It also satisfies the
+    # verified-contact gate on API-key creation (see app/api_keys/service.py),
+    # so a fresh signup can mint a key immediately.
+    #
+    # SECURITY: leaving this on in production lets anyone register an address
+    # they do not control and have it treated as proven, so it is OFF by
+    # default and logged loudly at startup when enabled.
+    auto_verify_new_users: bool = False
 
     email_provider: Literal["console", "smtp", "sendgrid", "resend", "ses"] = "console"
     email_from: str = "noreply@example.com"
@@ -61,6 +93,10 @@ class Settings(BaseSettings):
     sms_provider: Literal["console", "twilio", "aws_sns"] = "console"
     default_phone_region: str = "US"
     phone_user_email_domain: str = "phone-users.inference.dev"
+    # Sign-in-with-wallet (SIWE) login: synthetic-email domain for wallet-only
+    # accounts + the EIP-4361 chain id presented in the sign-in message.
+    wallet_user_email_domain: str = "wallet-users.inference.dev"
+    wallet_siwe_chain_id: int = Field(default=1, ge=1)
     twilio_account_sid: str | None = None
     twilio_auth_token: SecretStr | None = None
     twilio_from_number: str | None = None
@@ -74,13 +110,18 @@ class Settings(BaseSettings):
     router_max_output_tokens: int = Field(default=1_000_000, ge=1)
 
     stripe_secret_key: SecretStr | None = None
+    stripe_publishable_key: str | None = None
     stripe_webhook_secret: SecretStr | None = None
-    stripe_success_url: AnyHttpUrl | str = "http://localhost:8000/billing/success"
-    stripe_cancel_url: AnyHttpUrl | str = "http://localhost:8000/billing/cancel"
-    stripe_customer_portal_return_url: AnyHttpUrl | str = "http://localhost:8000/billing"
+    stripe_success_url: AnyHttpUrl | str = "http://localhost:3000/billing/success"
+    stripe_cancel_url: AnyHttpUrl | str = "http://localhost:3000/billing/cancel"
+    stripe_customer_portal_return_url: AnyHttpUrl | str = "http://localhost:3000/dashboard/billing"
     stripe_starter_price_id: str | None = None
     stripe_pro_price_id: str | None = None
     stripe_business_price_id: str | None = None
+    stripe_portal_configuration_id: str | None = None
+    stripe_starter_annual_price_id: str | None = None
+    stripe_pro_annual_price_id: str | None = None
+    stripe_business_annual_price_id: str | None = None
 
     ethereum_rpc_url: str | None = None
     ethereum_erc20_contract_address: str | None = None
@@ -98,7 +139,7 @@ class Settings(BaseSettings):
     # live in the inference service). See inference_api.ht_indexer.
     subnet_stake_quota_enabled: bool = False
 
-    @field_validator("cors_origins", "allowed_hosts", mode="before")
+    @field_validator("cors_origins", "allowed_hosts", "trusted_proxy_ips", mode="before")
     @classmethod
     def split_lists(cls, value: Any) -> list[str]:
         return _split_csv(value)
@@ -107,6 +148,11 @@ class Settings(BaseSettings):
     def validate_production_secrets(self) -> "Settings":
         if self.app_env != "production":
             return self
+        if self.debug:
+            raise ValueError(
+                "DEBUG must be false in production (it enables Starlette's "
+                "traceback response page for unhandled exceptions)"
+            )
         weak = "change-me-in-env"
         for name in (
             "jwt_secret",
@@ -115,6 +161,7 @@ class Settings(BaseSettings):
             "oauth_state_secret",
             "session_secret",
             "secret_pepper",
+            "sso_secret",
         ):
             secret_value = getattr(self, name).get_secret_value()
             if secret_value == weak or len(secret_value) < 32:
@@ -129,6 +176,8 @@ class Settings(BaseSettings):
             raise ValueError("TOKEN_REVOCATION_FAIL_OPEN must be false in production")
         if self.phone_user_email_domain == "phone-users.inference.dev":
             raise ValueError("PHONE_USER_EMAIL_DOMAIN must be set to an owned domain in production")
+        if self.wallet_user_email_domain == "wallet-users.inference.dev":
+            raise ValueError("WALLET_USER_EMAIL_DOMAIN must be set to an owned domain in production")
         return self
 
     @property

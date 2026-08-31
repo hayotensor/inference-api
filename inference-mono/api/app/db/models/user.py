@@ -27,6 +27,7 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone_number: Mapped[str | None] = mapped_column(String(32), unique=True, index=True)
     phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    wallet_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
@@ -67,3 +68,13 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
     )
 
     id: Mapped[uuid.UUID]
+
+    @property
+    def oauth_providers(self) -> list[str]:
+        """Names of OAuth providers linked to this account (e.g. ``["google"]``).
+
+        Used to lock the ``email`` field in self-service profile updates: an
+        OAuth-linked account's email is that provider's verified identity, not
+        something the user should be able to silently change in Settings.
+        """
+        return [account.oauth_name for account in self.oauth_accounts]

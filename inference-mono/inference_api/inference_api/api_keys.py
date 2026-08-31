@@ -13,7 +13,7 @@ from inference_api.config import settings
 from inference_api.db import get_async_session
 from inference_api.errors import forbidden, unauthorized
 from inference_api.logging import request_id_ctx
-from inference_api.models import APIKey, APIKeyUsage
+from inference_api.models import APIKey, APIKeyUsage, User
 from inference_api.redis import get_redis
 from inference_api.schemas import APIKeyUsageSummary
 from inference_api.security import constant_time_equal, is_past, keyed_hash, utcnow
@@ -47,6 +47,19 @@ class APIKeyService:
             raise unauthorized("API key has been revoked")
         if db_key.expires_at is not None and is_past(db_key.expires_at):
             raise unauthorized("API key has expired")
+        # A join across APIKey.user_id and User.id would save this round trip, but
+        # the two columns use different UUID column types (APIKey.user_id is a
+        # plain Uuid; User.id is the HyphenatedUUID TypeDecorator), which serialize
+        # to different string forms on SQLite and silently fail to match at the SQL
+        # level. session.get() goes through each column's own type decorator and is
+        # the same pattern RouterInferenceService._authenticate_user_api_key already
+        # uses, so we mirror it here rather than risk a join that only happens to
+        # work on Postgres's native uuid type.
+        user = await self.session.get(User, db_key.user_id)
+        if user is None:
+            raise unauthorized("API key owner no longer exists")
+        if not user.is_active:
+            raise forbidden("API key owner is inactive")
         if apply_rate_limit:
             await self.enforce_rate_limit(db_key, redis_client)
         db_key.last_used_at = utcnow()

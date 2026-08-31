@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from dataclasses import dataclass
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from inference_api.api_keys import APIKeyService, require_api_key
@@ -15,10 +18,12 @@ from inference_api.db import get_async_session
 from inference_api.errors import bad_request, not_found, service_unavailable, unauthorized
 from inference_api.mesh import MeshInferenceClient
 from inference_api.miners.service import MinerRegistryService
-from inference_api.models import APIKey, User
+from inference_api.models import APIKey, Miner, MinerModel, User
 from inference_api.routing.forwarder import ForwardError, TEEForwarder, Usage
 from inference_api.routing.selector import MinerCandidate, MinerSelector
+from inference_api import stats_recorder
 from inference_api.schemas import (
+    PROMPT_MAX_LENGTH,
     APIKeyUsageSummary,
     InferenceRequest,
     InferenceResponse,
@@ -29,12 +34,9 @@ from inference_api.schemas import (
 )
 from inference_api.usage import UsageService
 
-router = APIRouter(prefix="/v1", tags=["product-api"])
+logger = logging.getLogger(__name__)
 
-AVAILABLE_MODELS = [
-    ModelInfo(id="demo-inference-001", owned_by="inference-api"),
-    ModelInfo(id="demo-chat-001", owned_by="inference-api"),
-]
+router = APIRouter(prefix="/v1", tags=["product-api"])
 
 # Injectable so tests can route forwarding through the in-process dev-TEE transport.
 _forwarder_transport = None
@@ -57,6 +59,9 @@ class InferenceExecution:
     output_tokens: int
     charged_tokens: int
     remaining_tokens: int
+    # False only when the opt-in dev echo fallback answered instead of a real
+    # attested miner. See _execute_inference_mesh_fallback.
+    attested: bool = True
 
     @property
     def usage(self) -> dict[str, int]:
@@ -69,8 +74,93 @@ class InferenceExecution:
         }
 
 
-def model_by_id(model_id: str) -> ModelInfo | None:
-    return next((model for model in AVAILABLE_MODELS if model.id == model_id), None)
+# A miner in this state is gone for good, not briefly unavailable, so the models
+# it advertised must not linger in the catalog as "degraded" -- otherwise a
+# customer picks a model that can never be served. Anything else (pending,
+# verifying, stale, failed) is retryable and stays listed.
+_TERMINAL_MINER_STATES = ("revoked",)
+
+
+async def _all_registered_model_ids(session: AsyncSession) -> set[str]:
+    """Distinct model ids currently advertised by a NON-terminal miner.
+
+    ``MinerRegistryService.list_available_models`` only returns the fully
+    eligible subset (attested + healthy + loaded + active token), so it alone
+    cannot tell "this model was never registered on the platform" apart from
+    "it's registered but nothing can serve it right now". Both this and
+    ``_is_model_registered`` below answer the broader "registered" question by
+    querying ``miner_models`` directly -- excluding revoked miners, so a model
+    whose only host was revoked reads as never-registered (404) rather than as
+    temporarily degraded.
+    """
+    result = await session.execute(
+        select(MinerModel.model_id)
+        .join(Miner, Miner.id == MinerModel.miner_id)
+        .where(Miner.attestation_status.notin_(_TERMINAL_MINER_STATES))
+        .distinct()
+    )
+    return {row[0] for row in result.all()}
+
+
+async def _is_model_registered(session: AsyncSession, model_id: str) -> bool:
+    """Whether a non-terminal miner advertises ``model_id``."""
+    result = await session.execute(
+        select(MinerModel.id)
+        .join(Miner, Miner.id == MinerModel.miner_id)
+        .where(
+            MinerModel.model_id == model_id,
+            Miner.attestation_status.notin_(_TERMINAL_MINER_STATES),
+        )
+        .limit(1)
+    )
+    return result.first() is not None
+
+
+def _model_not_found(model: str) -> HTTPException:
+    """A distinct, machine-readable 404 for "never registered by any miner".
+
+    Mirrors ``errors.not_found``'s envelope shape/status code exactly, but with
+    code ``model_not_found`` (rather than the helper's fixed ``not_found``) so a
+    client can tell this apart from ``no_capacity`` (registered, but nothing can
+    serve it right now) without string-matching the message.
+    """
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"code": "model_not_found", "message": f"Model {model!r} is not hosted by any registered miner"},
+    )
+
+
+def _prompt_too_long_error(prompt: str, exc: ValidationError) -> HTTPException:
+    """Translate an ``InferenceRequest`` construction failure into a clean 4xx.
+
+    ``create_chat_completion`` builds an ``InferenceRequest`` by hand (it is not
+    a FastAPI-bound route parameter here, so pydantic's ``ValidationError``
+    would otherwise propagate as an unhandled 500). The realistic failure is the
+    combined message content exceeding ``PROMPT_MAX_LENGTH``, which we surface
+    as 413 (Payload Too Large: the request is well-formed, it's just bigger
+    than the server will process) naming the exact limit. Any other, unexpected
+    validation failure still becomes a clean 422 instead of a 500.
+    """
+    too_long = any(
+        error.get("loc") == ("prompt",) and error.get("type") == "string_too_long"
+        for error in exc.errors()
+    )
+    if too_long:
+        return HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={
+                "code": "prompt_too_long",
+                "message": (
+                    f"Combined message content is {len(prompt)} characters, which "
+                    f"exceeds the maximum prompt length of {PROMPT_MAX_LENGTH} "
+                    "characters. Shorten the messages and retry."
+                ),
+            },
+        )
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={"code": "invalid_request", "message": str(exc)},
+    )
 
 
 def text_from_openai_content(content: str | list[dict[str, object]] | None) -> str:
@@ -130,10 +220,15 @@ async def execute_inference(
 ) -> InferenceExecution:
     """Reserve -> forward (to an attested miner, with failover) -> settle.
 
-    When no attested+healthy miner hosts the requested model AND we are not in
-    production, falls back to the in-process mesh echo (dev convenience). The
-    SAME single reservation is reused across all failover candidates; settlement
-    always uses the REAL token counts the enclave reports.
+    When no attested+healthy miner hosts the requested model, this fails with a
+    proper error in EVERY environment: 404 ``model_not_found`` if no miner has
+    ever registered the model at all, else 503 ``no_capacity``. The only way to
+    get the in-process mesh echo (dev convenience) instead is the explicit
+    ``settings.allow_dev_echo_fallback`` opt-in (default off, and refused
+    outright in production by config.py's validator).
+
+    The SAME single reservation is reused across all failover candidates;
+    settlement always uses the REAL token counts the enclave reports.
     """
     user = await session.get(User, db_key.user_id)
     if user is None:
@@ -144,18 +239,20 @@ async def execute_inference(
     candidates = await MinerSelector(session).select(payload.model)
 
     if not candidates:
-        if settings.app_env == "production":
-            raise service_unavailable(
-                "no_capacity", f"No attested miner is serving model {payload.model!r}"
+        if settings.allow_dev_echo_fallback:
+            return await _execute_inference_mesh_fallback(
+                request=request,
+                payload=payload,
+                session=session,
+                db_key=db_key,
+                user=user,
+                usage_service=usage_service,
+                input_tokens=input_tokens,
             )
-        return await _execute_inference_mesh_fallback(
-            request=request,
-            payload=payload,
-            session=session,
-            db_key=db_key,
-            user=user,
-            usage_service=usage_service,
-            input_tokens=input_tokens,
+        if not await _is_model_registered(session, payload.model):
+            raise _model_not_found(payload.model)
+        raise service_unavailable(
+            "no_capacity", f"No attested miner is serving model {payload.model!r}"
         )
 
     # Single reservation reused across all failover candidates.
@@ -168,13 +265,22 @@ async def execute_inference(
     )
     forwarder = _make_forwarder(session)
     chat_payload = _chat_payload_from_prompt(payload)
+    # The id the enclave will stamp onto its usage row, so the miner-statistics row
+    # written below can later be reconciled against the enclave's signed receipt.
+    request_id = usage_event.request_id
     last_error: Exception | None = None
     try:
         for candidate in candidates[: settings.forward_max_attempts]:
             try:
-                result = await forwarder.forward(candidate, chat_payload)
+                result = await forwarder.forward(candidate, chat_payload, request_id=request_id)
             except ForwardError as exc:
                 last_error = exc
+                # Record the failed attempt against THIS miner before failing over.
+                # Dropping it (the previous behavior) made an unreliable miner
+                # indistinguishable from one that was never tried.
+                await stats_recorder.record_failure(
+                    session, candidate, exc, request_id=request_id
+                )
                 continue
             usage = result.usage
             output = _text_from_completion(result.body)
@@ -190,6 +296,15 @@ async def execute_inference(
             usage_event.miner_hotkey = candidate.hotkey
             usage_event.miner_model_hash = candidate.model_hash
             session.add(usage_event)
+            # Record the served attempt with the SETTLED counts so the statistics
+            # row and the billing row can never disagree about this request.
+            await stats_recorder.record_success(
+                session,
+                result,
+                request_id=request_id,
+                prompt_tokens=real_prompt_tokens,
+                completion_tokens=output_tokens,
+            )
             await APIKeyService(session).record_usage(
                 db_key,
                 request,
@@ -228,6 +343,27 @@ async def _execute_inference_mesh_fallback(
     usage_service: UsageService,
     input_tokens: int,
 ) -> InferenceExecution:
+    """Dev-only echo fallback. Only reachable via ``settings.allow_dev_echo_fallback``.
+
+    Deliberately NEVER billed: this output is fabricated (the TEE is bypassed
+    entirely), so charging a user real inference-token quota for it would be
+    fraudulent regardless of environment. The reservation is taken (so the
+    request participates in the same reserve/settle plumbing and any
+    insufficient-balance check still applies) but then released, not settled,
+    so ``charged_tokens`` is always 0 and the user's remaining balance is
+    unaffected. The request is still recorded in the API-key usage log (for
+    operator audit visibility that a call happened) but with zero input/output
+    tokens, so it cannot inflate the token counters ``GET /v1/usage`` reports
+    for real inference work.
+    """
+    logger.warning(
+        "dev_echo_fallback.served model=%r api_key_id=%s user_id=%s: no attested "
+        "miner is available for this model; the response below is a FABRICATED, "
+        "UNATTESTED echo (the TEE was bypassed) and is NOT billed",
+        payload.model,
+        db_key.id,
+        user.id,
+    )
     usage_event = await usage_service.reserve_inference_tokens(
         user,
         api_key_id=db_key.id,
@@ -239,16 +375,12 @@ async def _execute_inference_mesh_fallback(
         mesh_result = await MeshInferenceClient().run(payload)
         output = mesh_result.output
         output_tokens = mesh_result.output_tokens or max(1, len(output.split()))
-        usage_event = await usage_service.settle_inference_usage(
-            usage_event,
-            prompt_tokens=input_tokens,
-            completion_tokens=output_tokens,
-        )
+        await usage_service.release_inference_reservation(usage_event)
         await APIKeyService(session).record_usage(
             db_key,
             request,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            input_tokens=0,
+            output_tokens=0,
         )
     except Exception:
         await usage_service.release_inference_reservation(usage_event)
@@ -260,8 +392,9 @@ async def _execute_inference_mesh_fallback(
         output=output,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        charged_tokens=usage_event.charged_tokens,
+        charged_tokens=0,
         remaining_tokens=period.remaining_tokens,
+        attested=False,
     )
 
 
@@ -271,6 +404,20 @@ def openai_usage(execution: InferenceExecution) -> dict[str, int]:
         "completion_tokens": execution.output_tokens,
         "total_tokens": execution.input_tokens + execution.output_tokens,
     }
+
+
+def _system_fingerprint(execution: InferenceExecution) -> str | None:
+    """OpenAI-compatible, machine-readable "not real model output" stamp.
+
+    ``system_fingerprint`` is a real, nullable field in the OpenAI chat-
+    completions schema (meant to identify the backend configuration that
+    served the request), so setting it keeps every response OpenAI-schema-
+    compatible and lets a client detect the dev echo fallback programmatically
+    (``system_fingerprint == "dev-echo-unattested"``) without parsing message
+    content. Real attested completions leave it ``null``, same as OpenAI does
+    when it has nothing to report.
+    """
+    return None if execution.attested else "dev-echo-unattested"
 
 
 def chat_completion_response(
@@ -297,6 +444,7 @@ def chat_completion_response(
             }
         ],
         "usage": openai_usage(execution),
+        "system_fingerprint": _system_fingerprint(execution),
     }
 
 
@@ -321,6 +469,7 @@ async def chat_completion_stream(
         "created": created,
         "model": model,
         "usage": None,
+        "system_fingerprint": _system_fingerprint(execution),
     }
     yield sse_data(
         {
@@ -376,16 +525,26 @@ async def list_models(
     session: AsyncSession = Depends(get_async_session),
     db_key: APIKey = Depends(require_api_key(["models:read"])),
 ) -> ModelListResponse:
+    """Honest model catalog: real registered models only, never demo/static ids.
+
+    A model whose miner(s) went stale/unattested is kept in the list (marked
+    ``status="degraded"``) instead of silently disappearing, so a customer sees
+    *why* a model they used yesterday can't be reached today rather than it
+    just vanishing. See ``ModelInfo.status`` and A1's model_not_found/no_capacity
+    split, which this same registered-vs-available distinction underpins.
+    """
     await APIKeyService(session).record_usage(db_key, request)
-    model_ids = await MinerRegistryService(session).list_available_models()
+    available_ids = set(await MinerRegistryService(session).list_available_models())
+    all_ids = await _all_registered_model_ids(session)
     await session.commit()
-    if model_ids:
-        data = [ModelInfo(id=model_id, owned_by="talaris-miner") for model_id in model_ids]
-    elif settings.app_env != "production":
-        # Dev fallback: no registered miners yet — advertise the demo models.
-        data = AVAILABLE_MODELS
-    else:
-        data = []
+    data = [
+        ModelInfo(
+            id=model_id,
+            owned_by="talaris-miner",
+            status="available" if model_id in available_ids else "degraded",
+        )
+        for model_id in sorted(all_ids)
+    ]
     return ModelListResponse(data=data)
 
 
@@ -396,9 +555,13 @@ async def get_model(
     session: AsyncSession = Depends(get_async_session),
     db_key: APIKey = Depends(require_api_key(["models:read"])),
 ) -> ModelInfo:
-    model = model_by_id(model_id)
-    if model is None:
-        raise not_found("Model not found")
+    available_ids = set(await MinerRegistryService(session).list_available_models())
+    if model_id in available_ids:
+        model = ModelInfo(id=model_id, owned_by="talaris-miner", status="available")
+    elif await _is_model_registered(session, model_id):
+        model = ModelInfo(id=model_id, owned_by="talaris-miner", status="degraded")
+    else:
+        raise not_found(f"Model {model_id!r} not found")
     await APIKeyService(session).record_usage(db_key, request)
     await session.commit()
     return model
@@ -417,6 +580,7 @@ async def run_inference(
         model=payload.model,
         output=execution.output,
         usage=execution.usage,
+        attested=execution.attested,
     )
 
 
@@ -447,6 +611,7 @@ async def _routed_stream_response(
     )
     await session.commit()
     reservation_id = usage_event.id
+    request_id = usage_event.request_id
     forwarder = _make_forwarder(session)
     chat_payload = _chat_payload_from_prompt(inference_payload)
 
@@ -454,17 +619,22 @@ async def _routed_stream_response(
     last_error: Exception | None = None
     for candidate in candidates[: settings.forward_max_attempts]:
         try:
-            stream = await forwarder.forward_stream(candidate, chat_payload)
+            stream = await forwarder.forward_stream(candidate, chat_payload, request_id=request_id)
             break
         except ForwardError as exc:
             last_error = exc
+            await stats_recorder.record_failure(session, candidate, exc, request_id=request_id)
             continue
     if stream is None:
         await usage_service.release_inference_reservation(usage_event)
+        # Commits the release AND the failed-attempt rows recorded above.
         await session.commit()
         raise service_unavailable(
             "forward_failed", f"All miners failed for streaming: {last_error}"
         )
+    # Persist the failed attempts that preceded the working candidate; the request
+    # session is not committed again on the success path (settlement uses its own).
+    await session.commit()
 
     selected = stream.candidate
 
@@ -496,8 +666,30 @@ async def _routed_stream_response(
                         event.miner_hotkey = selected.hotkey
                         event.miner_model_hash = selected.model_hash
                         settle_session.add(event)
+                        # The stream is closed by now, so ``latency_ms``/``ttft_ms``
+                        # on the StreamForward are final.
+                        await stats_recorder.record_stream_success(
+                            settle_session, stream, request_id=request_id
+                        )
+                        # Real streaming previously settled the billing ledger
+                        # above but never recorded here, so a fully-drained
+                        # streaming call billed correctly yet never moved
+                        # GET /v1/usage's counters. Record it exactly once, with
+                        # the same REAL settled counts, using an explicit
+                        # request_id (not the ambient contextvar, which may no
+                        # longer be valid by the time this ``finally`` runs).
+                        await APIKeyService(settle_session).record_usage(
+                            db_key,
+                            request,
+                            input_tokens=prompt,
+                            output_tokens=completion,
+                            request_id=request_id,
+                        )
                     else:
                         # Client disconnected before any usage was seen: release.
+                        # No statistics row — the miner served nothing measurable,
+                        # and charging it a "failure" for the client's disconnect
+                        # would be wrong.
                         await svc.release_inference_reservation(event)
                     await settle_session.commit()
 
@@ -516,11 +708,19 @@ async def create_chat_completion(
     db_key: APIKey = Depends(require_api_key(["inference:write"])),
 ):
     prompt = prompt_from_openai_messages(payload.messages)
-    inference_payload = InferenceRequest(
-        model=payload.model,
-        prompt=prompt,
-        max_tokens=payload.resolved_max_tokens,
-    )
+    try:
+        inference_payload = InferenceRequest(
+            model=payload.model,
+            prompt=prompt,
+            max_tokens=payload.resolved_max_tokens,
+        )
+    except ValidationError as exc:
+        # OpenAIChatCompletionRequest puts no length cap on message content, so
+        # this manual InferenceRequest construction (unlike /v1/inference, where
+        # FastAPI binds InferenceRequest directly and already turns a
+        # ValidationError into a clean 422) is the only place an over-long
+        # prompt would otherwise surface as an unhandled 500.
+        raise _prompt_too_long_error(prompt, exc) from exc
     # Real streaming pass-through when an attested miner serves the model.
     if payload.stream:
         candidates = await MinerSelector(session).select(payload.model)
@@ -577,8 +777,12 @@ async def get_usage(
     session: AsyncSession = Depends(get_async_session),
     db_key: APIKey = Depends(require_api_key(["usage:read"])),
 ) -> APIKeyUsageSummary:
+    # Deliberately does NOT call record_usage here: APIKeyUsageSummary.requests
+    # counts every row in the api_key_usage log, so recording this read as a
+    # row made a plain GET /v1/usage inflate the very "requests" counter it
+    # reports -- misleading, since that counter is meant to represent
+    # inference requests, not reads of the usage summary itself.
     service = APIKeyService(session)
-    await service.record_usage(db_key, request)
     summary = await service.usage_summary(db_key)
     await session.commit()
     return summary

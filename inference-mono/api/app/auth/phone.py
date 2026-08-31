@@ -22,7 +22,7 @@ from app.core.security import (
 from app.db.models.phone_verification_code import PhoneVerificationCode, PhoneVerificationPurpose
 from app.db.models.user import User
 from app.sms.service import SMSService
-from app.users.schemas import UserRead
+from app.users.schemas import FULL_NAME_MAX_LENGTH, UserRead
 
 
 class PhoneRequestOTP(BaseModel):
@@ -34,7 +34,7 @@ class PhoneVerifyOTP(BaseModel):
     phone_number: str
     code: str = Field(min_length=6, max_length=6)
     email: EmailStr | None = None
-    full_name: str | None = None
+    full_name: str | None = Field(default=None, max_length=FULL_NAME_MAX_LENGTH)
 
 
 class PhoneLinkRequest(BaseModel):

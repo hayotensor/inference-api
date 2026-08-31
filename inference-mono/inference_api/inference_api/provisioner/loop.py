@@ -22,7 +22,7 @@ from sqlalchemy import or_, select
 
 from inference_api.config import settings
 from inference_api.db import async_session_maker
-from inference_api.models import Miner
+from inference_api.models import Miner, MinerModel
 from inference_api.provisioner.service import ProvisionError, ProvisionerService
 from inference_api.security import utcnow
 
@@ -78,6 +78,21 @@ async def provision_one(miner_id: uuid.UUID, redis_client: redis.Redis | None = 
 async def _candidates() -> list[uuid.UUID]:
     now = utcnow()
     async with async_session_maker() as session:
+        # A miner also needs provisioning when one of its MODELS is un-attested,
+        # even though the miner itself is currently attested and unexpired. That
+        # happens whenever a model is added to (or re-registered on) an already
+        # attested miner: `MinerRegistryService` creates the MinerModel row as
+        # "pending" but only resets the MINER's status when the TEE endpoint or
+        # key changed. Selecting on the miner alone therefore left that model
+        # permanently un-provisioned, so `MinerSelector` (which requires an
+        # attested MinerModel) would never route to it — a silent, permanent
+        # 503 for that model on an otherwise healthy miner.
+        model_needs_attestation = (
+            select(MinerModel.miner_id)
+            .where(MinerModel.attestation_status.in_(("pending", "stale")))
+            .distinct()
+            .scalar_subquery()
+        )
         result = await session.execute(
             select(Miner.id).where(
                 or_(
@@ -86,6 +101,7 @@ async def _candidates() -> list[uuid.UUID]:
                     (Miner.attestation_status == "attested")
                     & (Miner.attestation_expiry.is_not(None))
                     & (Miner.attestation_expiry <= now),
+                    Miner.id.in_(model_needs_attestation),
                 )
             )
         )

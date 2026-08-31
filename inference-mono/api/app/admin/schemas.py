@@ -151,6 +151,10 @@ class AdminBillingPlanRead(BaseModel):
     name: str
     description: str | None = None
     stripe_price_id: str | None = None
+    stripe_annual_price_id: str | None = None
+    price_cents: int = 0
+    annual_price_cents: int | None = None
+    currency: str = "usd"
     monthly_token_allowance: int
     active: bool
     visible: bool
@@ -174,13 +178,17 @@ class AdminBillingPlanCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     description: str | None = Field(default=None, max_length=512)
     stripe_price_id: str | None = Field(default=None, max_length=255)
+    stripe_annual_price_id: str | None = Field(default=None, max_length=255)
+    price_cents: int = Field(default=0, ge=0)
+    annual_price_cents: int | None = Field(default=None, ge=0)
+    currency: str = Field(default="usd", min_length=3, max_length=3)
     monthly_token_allowance: int = Field(ge=0)
     active: bool = True
     visible: bool = True
     sort_order: int = 0
     features: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("stripe_price_id")
+    @field_validator("stripe_price_id", "stripe_annual_price_id")
     @classmethod
     def blank_stripe_price_id_is_none(cls, value: str | None) -> str | None:
         if value is None:
@@ -194,13 +202,17 @@ class AdminBillingPlanUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=80)
     description: str | None = Field(default=None, max_length=512)
     stripe_price_id: str | None = Field(default=None, max_length=255)
+    stripe_annual_price_id: str | None = Field(default=None, max_length=255)
+    price_cents: int | None = Field(default=None, ge=0)
+    annual_price_cents: int | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
     monthly_token_allowance: int | None = Field(default=None, ge=0)
     active: bool | None = None
     visible: bool | None = None
     sort_order: int | None = None
     features: dict[str, Any] | None = None
 
-    @field_validator("stripe_price_id")
+    @field_validator("stripe_price_id", "stripe_annual_price_id")
     @classmethod
     def blank_stripe_price_id_is_none(cls, value: str | None) -> str | None:
         if value is None:

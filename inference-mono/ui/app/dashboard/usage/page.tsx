@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BarChart3, Loader2, RefreshCw } from "lucide-react";
+import { BarChart3, Layers, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { DashboardPageHeader } from "@/components/dashboard-shell";
@@ -65,17 +66,25 @@ export default function UsagePage() {
         title="Usage"
         description="Allowance, usage, and history are authoritative backend responses."
         action={
-          <Button
-            onClick={() => recalculateMutation.mutate(false)}
-            disabled={recalculateMutation.isPending}
-          >
-            {recalculateMutation.isPending ? (
-              <Loader2 className="animate-spin" />
-            ) : (
-              <RefreshCw />
-            )}
-            Recalculate
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button asChild variant="outline">
+              <Link href="/dashboard/usage/models">
+                <Layers />
+                Usage by model
+              </Link>
+            </Button>
+            <Button
+              onClick={() => recalculateMutation.mutate(false)}
+              disabled={recalculateMutation.isPending}
+            >
+              {recalculateMutation.isPending ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <RefreshCw />
+              )}
+              Recalculate
+            </Button>
+          </div>
         }
       />
 

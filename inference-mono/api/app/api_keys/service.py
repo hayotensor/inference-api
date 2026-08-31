@@ -15,10 +15,10 @@ from app.api_keys.schemas import (
     validate_api_key_scopes,
 )
 from app.core.config import settings
-from app.core.errors import forbidden, not_found, unauthorized
+from app.core.errors import bad_request, forbidden, not_found, unauthorized
 from app.core.logging import request_id_ctx
 from app.core.security import constant_time_equal, generate_api_key, is_past, keyed_hash, utcnow
-from app.db.models.api_key import APIKey
+from app.db.models.api_key import APIKey, APIKeyEnvironment
 from app.db.models.api_key_usage import APIKeyUsage
 from app.db.models.user import User
 
@@ -26,13 +26,28 @@ logger = logging.getLogger(__name__)
 
 
 class APIKeyService:
+    MAX_ACTIVE_API_KEYS = 25
+
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
     async def create_key(self, user: User, payload: APIKeyCreate) -> APIKeyCreateResponse:
-        if not (user.is_verified or user.phone_verified_at):
-            raise forbidden("Verify an email address or phone number before creating API keys")
+        if not (user.is_verified or user.phone_verified_at or user.wallet_verified_at):
+            raise forbidden(
+                "Verify an email address, phone number, or wallet before creating API keys"
+            )
         validate_api_key_scopes(payload.scopes)
+        active_count = await self.session.scalar(
+            select(func.count())
+            .select_from(APIKey)
+            .where(APIKey.user_id == user.id, APIKey.revoked_at.is_(None))
+        )
+        if active_count >= self.MAX_ACTIVE_API_KEYS:
+            raise bad_request(
+                "api_key_limit_exceeded",
+                f"You may have at most {self.MAX_ACTIVE_API_KEYS} active API keys. "
+                "Revoke an existing key before creating a new one.",
+            )
         full_key, prefix, last_four = generate_api_key(payload.environment.value)
         db_key = APIKey(
             user_id=user.id,
@@ -54,9 +69,71 @@ class APIKeyService:
             **APIKeyRead.model_validate(db_key).model_dump(),
         )
 
+    MANAGED_CHAT_KEY_NAME = "openwebui-chat"
+    MANAGED_CHAT_KEY_SCOPES = ["inference:write", "models:read"]
+
+    async def mint_managed_chat_key(
+        self, user: User, *, name: str = MANAGED_CHAT_KEY_NAME
+    ) -> APIKeyCreateResponse:
+        """Mint, or rotate in place, a managed live chat key for the edge broker.
+
+        Trusted action invoked only via an ``edge`` service token, so it bypasses
+        the human ``is_verified`` gate. One row per user for this ``name``: an
+        existing active row has its secret rotated in place rather than being
+        revoked-and-replaced, so the row doesn't multiply every time the edge
+        cache's TTL lapses between chat sessions. Any *extra* active duplicates
+        (e.g. left over from before rotate-in-place) are revoked here, converging
+        back to exactly one canonical row. The raw secret is returned exactly
+        once (only its hash is stored), so the edge cache is the source of
+        truth — a cache miss re-mints/rotates.
+        """
+        existing = await self.session.execute(
+            select(APIKey)
+            .where(
+                APIKey.user_id == user.id,
+                APIKey.name == name,
+                APIKey.revoked_at.is_(None),
+            )
+            .order_by(APIKey.created_at.asc())
+        )
+        rows = list(existing.scalars())
+        db_key = rows[0] if rows else None
+        now = utcnow()
+        for stale in rows[1:]:
+            stale.revoked_at = now
+            self.session.add(stale)
+
+        full_key, prefix, last_four = generate_api_key("live")
+        if db_key is None:
+            db_key = APIKey(
+                user_id=user.id,
+                name=name,
+                environment=APIKeyEnvironment.live,
+                rate_limit_per_minute=settings.api_key_default_rate_limit_per_minute,
+            )
+        db_key.prefix = prefix
+        db_key.last_four = last_four
+        db_key.hashed_key = keyed_hash(full_key)
+        db_key.scopes = list(self.MANAGED_CHAT_KEY_SCOPES)
+        self.session.add(db_key)
+        await self.session.flush()
+        return APIKeyCreateResponse(
+            key=full_key,
+            **APIKeyRead.model_validate(db_key).model_dump(),
+        )
+
     async def list_keys(self, user: User) -> list[APIKey]:
+        """List self-service keys for the dashboard.
+
+        Excludes the system-managed chat key (``MANAGED_CHAT_KEY_NAME``): it's
+        minted/rotated transparently for the Open-WebUI broker, not something the
+        user creates or copies, so it shouldn't clutter their own key list. It
+        remains fully visible via the admin API key views.
+        """
         result = await self.session.execute(
-            select(APIKey).where(APIKey.user_id == user.id).order_by(APIKey.created_at.desc())
+            select(APIKey)
+            .where(APIKey.user_id == user.id, APIKey.name != self.MANAGED_CHAT_KEY_NAME)
+            .order_by(APIKey.created_at.desc())
         )
         return list(result.scalars())
 

@@ -9,9 +9,11 @@ from app.billing.schemas import (
     BillingPlanRead,
     BillingSubscriptionRead,
     CancelSubscriptionRequest,
+    ChangeSubscriptionRequest,
     StripeCheckoutSessionRequest,
     StripeSessionResponse,
     StripeWebhookResponse,
+    SyncCheckoutSessionRequest,
 )
 from app.billing.service import BillingService
 from app.core.errors import bad_request
@@ -41,16 +43,38 @@ async def create_checkout_session(
     session: AsyncSession = Depends(get_async_session),
     user: User = Depends(current_active_user),
 ) -> StripeSessionResponse:
-    stripe_session = await BillingService(session).create_checkout_session(user, payload.plan_id)
+    stripe_session = await BillingService(session).create_checkout_session(
+        user, payload.plan_id, payload.interval
+    )
     await write_audit_log(
         session,
         "billing.checkout_session",
         user_id=user.id,
         request=request,
-        metadata={"plan_id": str(payload.plan_id), "session_id": stripe_session["id"]},
+        metadata={
+            "plan_id": str(payload.plan_id),
+            "interval": payload.interval,
+            "session_id": stripe_session["id"],
+        },
     )
     await session.commit()
     return StripeSessionResponse.model_validate(stripe_session)
+
+
+@router.post("/stripe/checkout-session/sync", response_model=BillingSubscriptionRead)
+@limiter.limit("30/minute")
+async def sync_checkout_session(
+    request: Request,
+    payload: SyncCheckoutSessionRequest,
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user),
+) -> BillingSubscriptionRead:
+    """Confirms a just-completed Checkout Session directly with Stripe instead of
+    waiting on the webhook, so /billing/success can show the new plan right away.
+    The webhook still runs and lands on the same idempotent sync path."""
+    result = await BillingService(session).sync_checkout_session_by_id(user, payload.session_id)
+    await session.commit()
+    return BillingSubscriptionRead.model_validate(result)
 
 
 @router.post("/stripe/customer-portal", response_model=StripeSessionResponse)
@@ -93,6 +117,32 @@ async def get_subscription(
     session: AsyncSession = Depends(get_async_session),
     user: User = Depends(current_active_user),
 ) -> BillingSubscriptionRead:
+    return BillingSubscriptionRead.model_validate(await BillingService(session).subscription_response(user))
+
+
+@router.post("/subscription/change", response_model=BillingSubscriptionRead)
+@limiter.limit("10/minute")
+async def change_subscription(
+    request: Request,
+    payload: ChangeSubscriptionRequest,
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user),
+) -> BillingSubscriptionRead:
+    subscription = await BillingService(session).change_subscription_plan(
+        user, payload.plan_id, payload.interval
+    )
+    await write_audit_log(
+        session,
+        "billing.subscription_change",
+        user_id=user.id,
+        request=request,
+        metadata={
+            "plan_id": str(payload.plan_id),
+            "interval": payload.interval,
+            "subscription_id": subscription.stripe_subscription_id,
+        },
+    )
+    await session.commit()
     return BillingSubscriptionRead.model_validate(await BillingService(session).subscription_response(user))
 
 

@@ -58,5 +58,23 @@ class UsageHistoryResponse(BaseModel):
     data: list[UsageEventRead]
 
 
+class UsageByModelRead(BaseModel):
+    model: str
+    request_count: int
+    prompt_tokens: int
+    completion_tokens: int
+    charged_tokens: int
+    last_used_at: datetime | None = None
+
+
+class UsageByModelResponse(BaseModel):
+    data: list[UsageByModelRead]
+
+
+class UsageByModelDetailResponse(BaseModel):
+    summary: UsageByModelRead
+    events: list[UsageEventRead]
+
+
 class UsageRecalculateRequest(BaseModel):
     include_balance_sync: bool = Field(default=False)

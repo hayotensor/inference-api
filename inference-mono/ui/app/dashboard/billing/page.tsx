@@ -1,9 +1,11 @@
 "use client";
 
+import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CreditCard, ExternalLink, Loader2, RefreshCw, XCircle } from "lucide-react";
+import { ArrowLeftRight, CreditCard, ExternalLink, Loader2, RefreshCw, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
+import { BillingIntervalToggle } from "@/components/billing-interval-toggle";
 import { DashboardPageHeader } from "@/components/dashboard-shell";
 import { ErrorState, LoadingState } from "@/components/data-state";
 import { Badge } from "@/components/ui/badge";
@@ -28,10 +30,19 @@ import {
   billingApi,
   redirectToStripeSession
 } from "@/lib/api";
-import { formatDate, formatNumber } from "@/lib/format";
+import { formatDate, formatMoney, formatNumber } from "@/lib/format";
+import {
+  annualSavingsPercent,
+  isStripeTestMode,
+  planIsFree,
+  planIsPurchasable,
+  planPriceCents
+} from "@/lib/stripe";
+import type { BillingInterval } from "@/lib/types";
 
 export default function BillingPage() {
   const queryClient = useQueryClient();
+  const [interval, setInterval] = React.useState<BillingInterval>("month");
   const subscriptionQuery = useQuery({
     queryKey: ["billing-subscription"],
     queryFn: billingApi.subscription
@@ -47,8 +58,19 @@ export default function BillingPage() {
     onError: (error) => toast.error(apiErrorMessage(error))
   });
   const checkoutMutation = useMutation({
-    mutationFn: billingApi.checkout,
+    mutationFn: ({ planId, interval: checkoutInterval }: { planId: string; interval: BillingInterval }) =>
+      billingApi.checkout(planId, checkoutInterval),
     onSuccess: redirectToStripeSession,
+    onError: (error) => toast.error(apiErrorMessage(error))
+  });
+  const changeMutation = useMutation({
+    mutationFn: ({ planId, interval: nextInterval }: { planId: string; interval: BillingInterval }) =>
+      billingApi.changePlan(planId, nextInterval),
+    onSuccess: async () => {
+      toast.success("Plan updated — Stripe will prorate the difference");
+      await queryClient.invalidateQueries({ queryKey: ["billing-subscription"] });
+      await queryClient.invalidateQueries({ queryKey: ["usage-allowance"] });
+    },
     onError: (error) => toast.error(apiErrorMessage(error))
   });
   const cancelMutation = useMutation({
@@ -60,16 +82,30 @@ export default function BillingPage() {
     onError: (error) => toast.error(apiErrorMessage(error))
   });
 
+  const plans = (plansQuery.data ?? []).filter((plan) => plan.active);
+  const savingsPercent = plans.reduce<number | null>(
+    (best, plan) => Math.max(best ?? 0, annualSavingsPercent(plan) ?? 0) || null,
+    null
+  );
+  const annualAvailable = plans.some((plan) => planIsPurchasable(plan, "year"));
+  const subscription = subscriptionQuery.data;
+  const hasActiveSubscription = Boolean(
+    subscription && ["active", "trialing", "past_due"].includes(subscription.status)
+  );
+
   return (
     <>
       <DashboardPageHeader
         title="Billing"
-        description="Stripe sessions and subscription state are created and synced by the backend."
+        description="Subscriptions are charged by Stripe. Changing an existing plan happens in the Stripe customer portal."
         action={
-          <Button variant="outline" onClick={() => void subscriptionQuery.refetch()}>
-            <RefreshCw />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            {isStripeTestMode ? <Badge variant="warning">Stripe test mode</Badge> : null}
+            <Button variant="outline" onClick={() => void subscriptionQuery.refetch()}>
+              <RefreshCw />
+              Refresh
+            </Button>
+          </div>
         }
       />
 
@@ -77,28 +113,35 @@ export default function BillingPage() {
         <Card>
           <CardHeader>
             <CardTitle>Current subscription</CardTitle>
-            <CardDescription>Raw subscription fields from `/billing/subscription`.</CardDescription>
+            <CardDescription>What Stripe is charging this account today.</CardDescription>
           </CardHeader>
           <CardContent>
             {subscriptionQuery.isLoading ? <LoadingState /> : null}
             {subscriptionQuery.isError ? <ErrorState error={subscriptionQuery.error} /> : null}
-            {subscriptionQuery.data ? (
+            {subscription ? (
               <div className="space-y-4 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">Status</span>
-                  <Badge variant={subscriptionQuery.data.status === "active" ? "success" : "outline"}>
-                    {subscriptionQuery.data.status}
+                  <Badge variant={subscription.status === "active" ? "success" : "outline"}>
+                    {subscription.status}
                   </Badge>
                 </div>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-muted-foreground">Price</span>
+                  <span className="text-2xl font-semibold tracking-normal">
+                    {subscription.amount_cents !== null && subscription.amount_cents !== undefined
+                      ? formatMoney(subscription.amount_cents, subscription.currency)
+                      : "$0"}
+                    <span className="text-sm font-normal text-muted-foreground">
+                      {subscription.interval === "year" ? " / year" : " / month"}
+                    </span>
+                  </span>
+                </div>
                 {[
-                  ["Plan", subscriptionQuery.data.plan_name ?? "None"],
-                  ["Stripe price", subscriptionQuery.data.stripe_price_id ?? "None"],
-                  ["Period start", formatDate(subscriptionQuery.data.current_period_start)],
-                  ["Period end", formatDate(subscriptionQuery.data.current_period_end)],
-                  [
-                    "Cancel at period end",
-                    subscriptionQuery.data.cancel_at_period_end ? "Yes" : "No"
-                  ]
+                  ["Plan", subscription.plan_name ?? "Free"],
+                  ["Period start", formatDate(subscription.current_period_start)],
+                  ["Period end", formatDate(subscription.current_period_end)],
+                  ["Cancel at period end", subscription.cancel_at_period_end ? "Yes" : "No"]
                 ].map(([label, value]) => (
                   <div key={label} className="flex justify-between gap-4">
                     <span className="text-muted-foreground">{label}</span>
@@ -120,10 +163,7 @@ export default function BillingPage() {
                   <Button
                     variant="outline"
                     onClick={() => cancelMutation.mutate()}
-                    disabled={
-                      cancelMutation.isPending ||
-                      subscriptionQuery.data.status !== "active"
-                    }
+                    disabled={cancelMutation.isPending || subscription.status !== "active"}
                   >
                     {cancelMutation.isPending ? (
                       <Loader2 className="animate-spin" />
@@ -140,8 +180,23 @@ export default function BillingPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Plans</CardTitle>
-            <CardDescription>Selecting a paid plan calls the API checkout endpoint.</CardDescription>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <CardTitle>Plans</CardTitle>
+                <CardDescription>
+                  {hasActiveSubscription
+                    ? "Switching plans updates the subscription in place; Stripe prorates the difference."
+                    : "Choosing a paid plan opens Stripe Checkout."}
+                </CardDescription>
+              </div>
+              {annualAvailable ? (
+                <BillingIntervalToggle
+                  value={interval}
+                  onChange={setInterval}
+                  savingsPercent={savingsPercent}
+                />
+              ) : null}
+            </div>
           </CardHeader>
           <CardContent>
             {plansQuery.isLoading ? <LoadingState /> : null}
@@ -152,49 +207,85 @@ export default function BillingPage() {
                   <TableRow>
                     <TableHead>Plan</TableHead>
                     <TableHead>Allowance</TableHead>
-                    <TableHead>Stripe</TableHead>
+                    <TableHead>Price</TableHead>
                     <TableHead className="text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {plansQuery.data
-                    .filter((plan) => plan.active)
-                    .map((plan) => {
-                      const current = subscriptionQuery.data?.plan_id === plan.id;
-                      return (
-                        <TableRow key={plan.id}>
-                          <TableCell className="font-medium">{plan.name}</TableCell>
-                          <TableCell>{formatNumber(plan.monthly_token_allowance)}</TableCell>
-                          <TableCell>
-                            {plan.stripe_price_id ? (
-                              <Badge variant="outline">Paid</Badge>
-                            ) : (
-                              <Badge variant="secondary">Free</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {current ? (
-                              <Badge variant="success">Current</Badge>
-                            ) : plan.stripe_price_id ? (
-                              <Button
-                                size="sm"
-                                onClick={() => checkoutMutation.mutate(plan.id)}
-                                disabled={checkoutMutation.isPending}
-                              >
-                                {checkoutMutation.isPending ? (
-                                  <Loader2 className="animate-spin" />
-                                ) : (
-                                  <CreditCard />
-                                )}
-                                Choose
-                              </Button>
-                            ) : (
-                              <span className="text-sm text-muted-foreground">Included</span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
+                  {plans.map((plan) => {
+                    // A canceled subscription keeps its plan_id (so "what plan you
+                    // were on" stays visible), so matching on plan_id alone would
+                    // still mark that plan "Current" with no way to re-choose it.
+                    const current = subscription?.plan_id === plan.id && hasActiveSubscription;
+                    const isFree = planIsFree(plan);
+                    const purchasable = planIsPurchasable(plan, interval);
+                    const priceCents = isFree ? 0 : planPriceCents(plan, interval);
+                    // Both mutations are shared across every row in the table, so
+                    // isPending alone would spin every button at once — only the
+                    // row whose plan/interval matches the in-flight call should.
+                    const isThisRowChanging =
+                      changeMutation.isPending &&
+                      changeMutation.variables?.planId === plan.id &&
+                      changeMutation.variables?.interval === interval;
+                    const isThisRowCheckingOut =
+                      checkoutMutation.isPending &&
+                      checkoutMutation.variables?.planId === plan.id &&
+                      checkoutMutation.variables?.interval === interval;
+                    return (
+                      <TableRow key={plan.id}>
+                        <TableCell className="font-medium">{plan.name}</TableCell>
+                        <TableCell>{formatNumber(plan.monthly_token_allowance)}</TableCell>
+                        <TableCell>
+                          {isFree || purchasable ? (
+                            <span>
+                              {formatMoney(priceCents, plan.currency)}
+                              <span className="text-muted-foreground">
+                                {interval === "year" && !isFree ? " / yr" : " / mo"}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">Not offered</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {current ? (
+                            <Badge variant="success">Current</Badge>
+                          ) : isFree ? (
+                            <span className="text-sm text-muted-foreground">Included</span>
+                          ) : !purchasable ? (
+                            <span className="text-sm text-muted-foreground">—</span>
+                          ) : hasActiveSubscription ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => changeMutation.mutate({ planId: plan.id, interval })}
+                              disabled={isThisRowChanging}
+                            >
+                              {isThisRowChanging ? (
+                                <Loader2 className="animate-spin" />
+                              ) : (
+                                <ArrowLeftRight />
+                              )}
+                              Switch
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              onClick={() => checkoutMutation.mutate({ planId: plan.id, interval })}
+                              disabled={isThisRowCheckingOut}
+                            >
+                              {isThisRowCheckingOut ? (
+                                <Loader2 className="animate-spin" />
+                              ) : (
+                                <CreditCard />
+                              )}
+                              Choose
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             ) : null}

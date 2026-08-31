@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-TEST_DB_PATH = Path("/tmp/inference_api_test.sqlite")
+TEST_DB_PATH = Path(os.environ.get("TEST_DB_PATH", "/tmp/inference_api_test.sqlite"))
 TEST_DB_PATH.unlink(missing_ok=True)
 
 os.environ.update(

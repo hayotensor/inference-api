@@ -10,6 +10,7 @@ from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi_users.jwt import decode_jwt, generate_jwt
 from jwt import PyJWTError
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.token_revocation import is_jti_revoked, revoke_access_token
@@ -51,6 +52,40 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
             raise InvalidPasswordException(reason="Password must not contain the email address")
 
+    @staticmethod
+    async def _record_single_use_token(
+        session: AsyncSession,
+        model: type[EmailVerificationToken] | type[PasswordResetToken],
+        *,
+        user_id: uuid.UUID,
+        token: str,
+        lifetime_seconds: int,
+    ) -> None:
+        """Store the hash of a verification/reset token, tolerating a repeat.
+
+        The token is a JWT whose only per-request input is its `exp`, so two requests
+        in the same second produce byte-identical tokens — and `token_hash` is unique.
+        Inserting blindly makes a second "resend" within that window fail with an
+        IntegrityError (a 500 on the very endpoint used to recover from a failed
+        send), even though the row already on file is the same still-valid token.
+        """
+        token_hash = keyed_hash(token)
+        existing = await session.scalar(select(model).where(model.token_hash == token_hash))
+        if existing is not None:
+            return
+        session.add(
+            model(
+                user_id=user_id,
+                token_hash=token_hash,
+                expires_at=expires_in(seconds=lifetime_seconds),
+            )
+        )
+        try:
+            await session.commit()
+        except IntegrityError:
+            # Lost a race with a concurrent identical request; its row is equivalent.
+            await session.rollback()
+
     async def on_after_register(self, user: User, request: Request | None = None) -> None:
         logger.info("auth.registered", extra={"user_id": str(user.id)})
 
@@ -59,15 +94,24 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     ) -> None:
         session = getattr(self.user_db, "session", None)
         if session is not None:
-            session.add(
-                EmailVerificationToken(
-                    user_id=user.id,
-                    token_hash=keyed_hash(token),
-                    expires_at=expires_in(seconds=self.verification_token_lifetime_seconds),
-                )
+            await self._record_single_use_token(
+                session,
+                EmailVerificationToken,
+                user_id=user.id,
+                token=token,
+                lifetime_seconds=self.verification_token_lifetime_seconds,
             )
-            await session.commit()
-        await EmailService().send_verification_email(user.email, token)
+        try:
+            await EmailService().send_verification_email(user.email, token)
+        except Exception:
+            # The account and its verification token already exist, so a delivery
+            # failure must not turn signup into a 500 the caller cannot retry: the
+            # address would be taken with no way to prove it. POST
+            # /auth/request-verify-email re-sends. Logged so a broken or
+            # misconfigured sender is visible instead of silent.
+            logger.exception(
+                "auth.verification_email_failed", extra={"user_id": str(user.id)}
+            )
 
     async def on_after_verify(self, user: User, request: Request | None = None) -> None:
         session = getattr(self.user_db, "session", None)
@@ -88,15 +132,21 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     ) -> None:
         session = getattr(self.user_db, "session", None)
         if session is not None:
-            session.add(
-                PasswordResetToken(
-                    user_id=user.id,
-                    token_hash=keyed_hash(token),
-                    expires_at=expires_in(seconds=self.reset_password_token_lifetime_seconds),
-                )
+            await self._record_single_use_token(
+                session,
+                PasswordResetToken,
+                user_id=user.id,
+                token=token,
+                lifetime_seconds=self.reset_password_token_lifetime_seconds,
             )
-            await session.commit()
-        await EmailService().send_password_reset_email(user.email, token)
+        try:
+            await EmailService().send_password_reset_email(user.email, token)
+        except Exception:
+            # The forgot-password endpoint always answers 202 so it cannot be used to
+            # enumerate accounts; a send failure must not break that contract.
+            logger.exception(
+                "auth.password_reset_email_failed", extra={"user_id": str(user.id)}
+            )
 
     async def on_after_reset_password(self, user: User, request: Request | None = None) -> None:
         session = getattr(self.user_db, "session", None)
@@ -223,6 +273,23 @@ class AuthService:
         strategy = get_jwt_strategy()
         return await strategy.write_token(user)
 
+    def issue_sso_token(self, user: User) -> tuple[str, int]:
+        """Mint a medium-TTL SSO JWT the edge Worker verifies (shared secret) to
+        identify the logged-in user when routing to the /chat surface."""
+        data = {
+            "sub": str(user.id),
+            "email": user.email,
+            "name": user.full_name or "",
+            "aud": [settings.sso_audience],
+        }
+        token = generate_jwt(
+            data,
+            settings.sso_secret.get_secret_value(),
+            settings.sso_ttl_seconds,
+            algorithm="HS256",
+        )
+        return token, settings.sso_ttl_seconds
+
     async def create_refresh_token(
         self,
         user: User,
@@ -314,8 +381,13 @@ class AuthService:
             await self.session.commit()
 
     async def create_random_password_user(self, email: str, *, full_name: str | None = None) -> User:
-        from app.users.schemas import UserCreate
+        from app.users.schemas import FULL_NAME_MAX_LENGTH, UserCreate
 
+        # Identity providers (OAuth) supply the display name, so it is not bound by any
+        # request schema. Truncate rather than reject: a long provider display name must
+        # never fail an otherwise-valid sign-in.
+        if full_name is not None:
+            full_name = full_name[:FULL_NAME_MAX_LENGTH]
         password = secrets.token_urlsafe(32)
         return await self.user_manager.create(
             UserCreate(email=email, password=password, full_name=full_name),

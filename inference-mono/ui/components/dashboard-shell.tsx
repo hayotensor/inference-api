@@ -1,5 +1,7 @@
 "use client";
 
+import * as React from "react";
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -8,10 +10,11 @@ import {
   KeyRound,
   LayoutDashboard,
   LogOut,
+  MessagesSquare,
   MessageSquareText,
-  Settings,
-  WalletCards
+  Settings
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 import { AppLogo } from "@/components/app-logo";
 import { PageLoadingState } from "@/components/loading-spinner";
@@ -21,12 +24,20 @@ import { AuthGate, useAuth } from "@/lib/auth";
 import { navPathMatches, usePendingNavPath } from "@/lib/pending-nav";
 import { cn } from "@/lib/utils";
 
-const navItems = [
+type NavItem = { href: string; label: string; icon: LucideIcon; external?: boolean };
+
+// Chat is the rebranded Open-WebUI, never a Next.js route, so it is always a
+// full-page navigation. Path-based /chat needs Open-WebUI built with
+// PUBLIC_BASE_PATH=/chat (its assets and SPA routes are otherwise root-absolute);
+// with a stock build, point NEXT_PUBLIC_CHAT_URL at its own hostname instead.
+const CHAT_URL = process.env.NEXT_PUBLIC_CHAT_URL || "/chat";
+
+const navItems: NavItem[] = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+  { href: CHAT_URL, label: "Chat", icon: MessagesSquare, external: true },
   { href: "/dashboard/api-keys", label: "API keys", icon: KeyRound },
   { href: "/dashboard/usage", label: "Usage", icon: BarChart3 },
   { href: "/dashboard/billing", label: "Billing", icon: CreditCard },
-  { href: "/dashboard/wallet", label: "Wallet", icon: WalletCards },
   { href: "/dashboard/playground", label: "Playground", icon: MessageSquareText },
   { href: "/dashboard/settings", label: "Settings", icon: Settings }
 ];
@@ -34,7 +45,24 @@ const navItems = [
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { activePath, isPending, markPendingHref } = usePendingNavPath(pathname);
-  const { user, logout } = useAuth();
+  const { user, logout, ensureSsoCookie } = useAuth();
+
+  // Chat lives behind a front door that authenticates by the httpOnly SSO cookie.
+  // Navigating there before that cookie is in place gets the user bounced to the
+  // login screen, so mint it first and then leave.
+  const leaveForExternal = React.useCallback(
+    async (href: string, event: React.MouseEvent<HTMLAnchorElement>) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+      event.preventDefault();
+      try {
+        await ensureSsoCookie();
+      } catch {
+        // Best-effort: still navigate, the front door will redirect if needed.
+      }
+      window.location.assign(href);
+    },
+    [ensureSsoCookie]
+  );
 
   return (
     <AuthGate requireAuth>
@@ -48,15 +76,29 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const active = navPathMatches(activePath, item.href, "/dashboard");
+                const className = cn(
+                  "pointer-events-auto flex h-10 items-center gap-3 rounded-md px-3 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground",
+                  active && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground"
+                );
+                if (item.external) {
+                  return (
+                    <a
+                      key={item.href}
+                      href={item.href}
+                      className={className}
+                      onClick={(event) => leaveForExternal(item.href, event)}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {item.label}
+                    </a>
+                  );
+                }
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
                     onClick={(event) => markPendingHref(item.href, event)}
-                    className={cn(
-                      "pointer-events-auto flex h-10 items-center gap-3 rounded-md px-3 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground",
-                      active && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground"
-                    )}
+                    className={className}
                   >
                     <Icon className="h-4 w-4" />
                     {item.label}
@@ -97,15 +139,29 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const active = navPathMatches(activePath, item.href, "/dashboard");
+                const className = cn(
+                  "pointer-events-auto flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-sm text-muted-foreground",
+                  active && "bg-primary text-primary-foreground"
+                );
+                if (item.external) {
+                  return (
+                    <a
+                      key={item.href}
+                      href={item.href}
+                      className={className}
+                      onClick={(event) => leaveForExternal(item.href, event)}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {item.label}
+                    </a>
+                  );
+                }
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
                     onClick={(event) => markPendingHref(item.href, event)}
-                    className={cn(
-                      "pointer-events-auto flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-sm text-muted-foreground",
-                      active && "bg-primary text-primary-foreground"
-                    )}
+                    className={className}
                   >
                     <Icon className="h-4 w-4" />
                     {item.label}

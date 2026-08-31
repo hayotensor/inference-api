@@ -108,6 +108,17 @@ class RouterInferenceService:
         raw_user_api_key: str,
         payload: RouterUsageSettle,
     ) -> RouterReservationResponse:
+        """Settle usage a SUBNET ROUTER forwarded on our behalf.
+
+        Deliberately does NOT write a ``miner_request_stats`` row. ``RouterUsageSettle``
+        carries no miner identity and no timing — the platform did not select or
+        measure this forward, the router did. Recording it would put a third party's
+        unverified assertion into the signed epoch snapshot, which is precisely the
+        self-reporting the miner-statistics redesign exists to eliminate. Router-plane
+        usage is billed here and stays out of scoring; if it should ever count toward
+        rewards, the router protocol must first carry the miner hotkey AND the usage
+        must be reconcilable against that enclave's signed receipt chain.
+        """
         db_key, user = await self._authenticate_user_api_key(
             raw_user_api_key,
             redis_client=None,

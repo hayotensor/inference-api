@@ -19,6 +19,7 @@ export interface User {
   phone_number: string | null;
   phone_verified_at: string | null;
   created_at: string;
+  oauth_providers: string[];
 }
 
 export interface TokenResponse {
@@ -63,12 +64,18 @@ export interface ApiKeyCreateResponse extends ApiKeyRead {
   key: string;
 }
 
+export type BillingInterval = "month" | "year";
+
 export interface BillingPlan {
   id: UUID;
   slug: string;
   name: string;
   description: string | null;
   stripe_price_id: string | null;
+  stripe_annual_price_id: string | null;
+  price_cents: number;
+  annual_price_cents: number | null;
+  currency: string;
   monthly_token_allowance: number;
   active: boolean;
   visible: boolean;
@@ -90,6 +97,9 @@ export interface BillingSubscription {
   stripe_price_id: string | null;
   plan_id: UUID | null;
   plan_name: string | null;
+  interval: BillingInterval | null;
+  amount_cents: number | null;
+  currency: string | null;
   status: string;
   current_period_start: string | null;
   current_period_end: string | null;
@@ -141,6 +151,24 @@ export interface UsageEvent {
 
 export interface UsageHistoryResponse {
   data: UsageEvent[];
+}
+
+export interface UsageByModel {
+  model: string;
+  request_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  charged_tokens: number;
+  last_used_at: string | null;
+}
+
+export interface UsageByModelResponse {
+  data: UsageByModel[];
+}
+
+export interface UsageByModelDetailResponse {
+  summary: UsageByModel;
+  events: UsageEvent[];
 }
 
 export interface EvmNonceResponse {

@@ -8,6 +8,7 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
+import { AdminConfirmDialog } from "@/components/admin-common";
 import { DashboardPageHeader } from "@/components/dashboard-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 import { Badge } from "@/components/ui/badge";
@@ -34,7 +35,7 @@ import {
 } from "@/components/ui/table";
 import { apiErrorMessage, apiKeysApi } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
-import type { ApiKeyCreateResponse, ApiKeyScope } from "@/lib/types";
+import type { ApiKeyCreateResponse, ApiKeyRead, ApiKeyScope } from "@/lib/types";
 
 const scopes: { value: ApiKeyScope; label: string }[] = [
   { value: "models:read", label: "Read models" },
@@ -56,6 +57,7 @@ export default function ApiKeysPage() {
   const queryClient = useQueryClient();
   const [plaintextKey, setPlaintextKey] = useState<ApiKeyCreateResponse | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [revoking, setRevoking] = useState<ApiKeyRead | null>(null);
   const form = useForm<CreateKeyForm>({
     resolver: zodResolver(createSchema),
     defaultValues: {
@@ -92,6 +94,7 @@ export default function ApiKeysPage() {
     mutationFn: apiKeysApi.revoke,
     onSuccess: async () => {
       toast.success("API key revoked");
+      setRevoking(null);
       await queryClient.invalidateQueries({ queryKey: ["api-keys"] });
     },
     onError: (error) => toast.error(apiErrorMessage(error))
@@ -256,8 +259,8 @@ export default function ApiKeysPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        disabled={revoked || revokeMutation.isPending}
-                        onClick={() => revokeMutation.mutate(key.id)}
+                        disabled={revoked}
+                        onClick={() => setRevoking(key)}
                       >
                         <Trash2 />
                         Revoke
@@ -307,6 +310,24 @@ export default function ApiKeysPage() {
           ) : null}
         </DialogContent>
       </Dialog>
+
+      <AdminConfirmDialog
+        open={Boolean(revoking)}
+        onOpenChange={(open) => {
+          if (!open) setRevoking(null);
+        }}
+        title="Revoke this API key?"
+        description={
+          revoking
+            ? `"${revoking.name}" will stop authenticating requests immediately. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Revoke API key"
+        pending={revokeMutation.isPending}
+        onConfirm={() => {
+          if (revoking) revokeMutation.mutate(revoking.id);
+        }}
+      />
     </>
   );
 }

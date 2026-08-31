@@ -1,7 +1,9 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_DEFAULT_TIMEOUT=300 \
+    PIP_RETRIES=10
 
 WORKDIR /app
 
@@ -11,9 +13,13 @@ RUN apt-get update \
 
 COPY pyproject.toml README.md ./
 COPY inference_api ./inference_api
+# Vendored sibling packages (shared wire-format SDK + attestation verifier).
+# Not on PyPI; the code imports them (talaris_contracts, talaris_attest).
+COPY vendor ./vendor
 
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir .
+    && pip install --no-cache-dir . \
+    && pip install --no-cache-dir ./vendor/talaris-contracts ./vendor/talaris-attestation-verifier
 
 EXPOSE 8001
 

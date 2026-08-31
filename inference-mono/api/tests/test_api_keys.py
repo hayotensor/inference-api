@@ -1,7 +1,9 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from app.db.models.api_key import APIKey
+from app.api_keys.service import APIKeyService
+from app.core.security import generate_uuid
+from app.db.models.api_key import APIKey, APIKeyEnvironment
 from app.db.session import async_session_maker
 
 
@@ -123,3 +125,52 @@ async def test_api_key_creation_requires_verified_account(client, monkeypatch):
         json={"name": "blocked", "environment": "test"},
     )
     assert response.status_code == 403
+
+
+async def test_api_key_creation_is_capped_at_the_active_limit(client, monkeypatch):
+    session = await create_phone_verified_session(client, monkeypatch)
+    access_token = session["access_token"]
+    user_id = UUID(session["user"]["id"])
+
+    async with async_session_maker() as db_session:
+        db_session.add_all(
+            APIKey(
+                user_id=user_id,
+                name=f"bulk-{i}",
+                environment=APIKeyEnvironment.test,
+                prefix="sk_test_bulk",
+                last_four="0000",
+                hashed_key=generate_uuid().hex,
+                scopes=["models:read"],
+                rate_limit_per_minute=600,
+            )
+            for i in range(APIKeyService.MAX_ACTIVE_API_KEYS)
+        )
+        await db_session.commit()
+
+    at_limit = await client.post(
+        "/api-keys",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={"name": "one too many", "environment": "test"},
+    )
+    assert at_limit.status_code == 400
+    assert at_limit.json()["detail"]["code"] == "api_key_limit_exceeded"
+
+    # Revoking one active key frees a slot.
+    async with async_session_maker() as db_session:
+        result = await db_session.execute(
+            APIKey.__table__.select().where(APIKey.user_id == user_id).limit(1)
+        )
+        one = result.first()
+    revoke = await client.delete(
+        f"/api-keys/{one.id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert revoke.status_code == 204
+
+    under_limit = await client.post(
+        "/api-keys",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={"name": "fits now", "environment": "test"},
+    )
+    assert under_limit.status_code == 201

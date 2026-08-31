@@ -1,22 +1,78 @@
 import json
 from datetime import timedelta
 
+import httpx
+import pytest
+
+from inference_api import product_routes
 from inference_api.db import async_session_maker
 from inference_api.models import APIKey
 from inference_api.security import utcnow
 
+from _tee import StubChatTransport
 
-async def test_models_inference_and_usage_summary(client, seed_api_key):
+# The forwarder only ever calls this on the injected transport when it has no
+# real "other traffic" to fall through to (these tests seed the miner/token
+# rows directly via the conftest fixtures, bypassing attestation/provisioning
+# entirely, so nothing here should ever hit a path other than
+# POST /v1/chat/completions). Any request that isn't that is a test bug.
+_UNREACHABLE_INNER = httpx.MockTransport(
+    lambda request: httpx.Response(500, json={"error": f"unexpected request to {request.url}"})
+)
+
+
+@pytest.fixture
+def reset_forwarder_transport():
+    yield
+    product_routes.set_forwarder_transport(None)
+
+
+async def _seed_attested_miner(seed_miner, seed_provisioned_token, *, model_id: str):
+    """Stand up a fully attested + healthy + tokened miner serving ``model_id``.
+
+    Uses the same conftest fixtures (``seed_miner`` / ``seed_provisioned_token``)
+    that ``test_routing_forward.py`` and the other fix-round regression tests use
+    to get a genuinely eligible ``MinerSelector`` candidate, without needing the
+    real dev-TEE producer app (these tests are about bearer auth / usage
+    accounting / SSE streaming, not attestation, so only the enclave's HTTP
+    response -- faked via ``StubChatTransport`` -- needs to be real).
+    """
+    miner = await seed_miner(model_ids=[model_id])
+    await seed_provisioned_token(miner_id=miner.miner_id, model_id=model_id)
+    return miner
+
+
+def _stub_transport(*, content: str, prompt_tokens: int, completion_tokens: int) -> StubChatTransport:
+    return StubChatTransport(
+        _UNREACHABLE_INNER,
+        content=content,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+    )
+
+
+async def test_models_inference_and_usage_summary(
+    client, seed_api_key, seed_miner, seed_provisioned_token, reset_forwarder_transport
+):
     seeded = await seed_api_key(credits=10_000)
+    # A real attested/healthy/tokened miner serving the model /v1/inference
+    # defaults to, so the registry is honest (no invented demo ids) AND the
+    # inference call below exercises the genuine reserve -> forward -> settle
+    # path instead of the removed echo fallback.
+    await _seed_attested_miner(seed_miner, seed_provisioned_token, model_id="demo-inference-001")
 
     models = await client.get("/v1/models", headers={"Authorization": f"Bearer {seeded.raw_key}"})
     assert models.status_code == 200, models.text
-    assert [model["id"] for model in models.json()["data"]] == ["demo-inference-001", "demo-chat-001"]
+    assert [model["id"] for model in models.json()["data"]] == ["demo-inference-001"]
+    assert models.json()["data"][0]["status"] == "available"
 
     async with async_session_maker() as session:
         db_key = await session.get(APIKey, seeded.api_key_id)
         assert db_key.last_used_at is not None
 
+    product_routes.set_forwarder_transport(
+        _stub_transport(content="Hello from the attested miner.", prompt_tokens=2, completion_tokens=3)
+    )
     inference = await client.post(
         "/v1/inference",
         headers={"X-API-Key": seeded.raw_key},
@@ -24,7 +80,9 @@ async def test_models_inference_and_usage_summary(client, seed_api_key):
     )
     assert inference.status_code == 200, inference.text
     body = inference.json()
-    assert body["output"] == "Echo: hello platform"
+    # Real, attested output -- not a fabricated echo.
+    assert body["output"] == "Hello from the attested miner."
+    assert body["attested"] is True
     assert body["usage"]["input_tokens"] == 2
     assert body["usage"]["output_tokens"] == 3
     assert body["usage"]["remaining_tokens"] == 9_995
@@ -32,7 +90,9 @@ async def test_models_inference_and_usage_summary(client, seed_api_key):
     usage = await client.get("/v1/usage", headers={"Authorization": f"Bearer {seeded.raw_key}"})
     assert usage.status_code == 200, usage.text
     assert usage.json()["api_key_id"] == str(seeded.api_key_id)
-    assert usage.json()["requests"] >= 3
+    # /v1/models + /v1/inference recorded a request each; GET /v1/usage itself
+    # deliberately does not increment its own counter (see get_usage).
+    assert usage.json()["requests"] >= 2
     assert usage.json()["input_tokens"] == 2
     assert usage.json()["output_tokens"] == 3
 
@@ -61,8 +121,17 @@ async def test_api_key_scope_expiration_and_revocation_failures(client, seed_api
     assert revoked_response.status_code == 401
 
 
-async def test_openai_chat_completion_uses_bearer_key_and_tracks_usage(client, seed_api_key):
+async def test_openai_chat_completion_uses_bearer_key_and_tracks_usage(
+    client, seed_api_key, seed_miner, seed_provisioned_token, reset_forwarder_transport
+):
+    """Bearer-token API-key auth still works, and usage still gets tracked --
+    now proven against a REAL attested miner rather than the removed echo
+    fallback that used to make this convenient."""
     seeded = await seed_api_key(raw_key="sk_test_openai_chat", credits=10_000)
+    await _seed_attested_miner(seed_miner, seed_provisioned_token, model_id="demo-chat-001")
+    product_routes.set_forwarder_transport(
+        _stub_transport(content="Hello from the attested miner.", prompt_tokens=6, completion_tokens=7)
+    )
 
     response = await client.post(
         "/v1/chat/completions",
@@ -87,11 +156,14 @@ async def test_openai_chat_completion_uses_bearer_key_and_tracks_usage(client, s
             "index": 0,
             "message": {
                 "role": "assistant",
-                "content": "Echo: system: Answer tersely.\n\nuser: hello platform",
+                "content": "Hello from the attested miner.",
             },
             "finish_reason": "stop",
         }
     ]
+    # null system_fingerprint == real attested completion, not the dev echo
+    # fallback (which stamps "dev-echo-unattested").
+    assert body["system_fingerprint"] is None
     assert body["usage"] == {
         "prompt_tokens": 6,
         "completion_tokens": 7,
@@ -104,8 +176,21 @@ async def test_openai_chat_completion_uses_bearer_key_and_tracks_usage(client, s
     assert usage.json()["output_tokens"] == 7
 
 
-async def test_openai_chat_completion_streams_sse_chunks(client, seed_api_key):
+async def test_openai_chat_completion_streams_sse_chunks(
+    client, seed_api_key, seed_miner, seed_provisioned_token, reset_forwarder_transport
+):
+    """Streaming still produces real SSE chunks terminated by [DONE], with a
+    final usage chunk carrying the REAL token counts -- now via the genuine
+    routed streaming pass-through (product_routes._routed_stream_response)
+    against an attested miner, since that path relays the miner's raw SSE
+    bytes unmodified rather than the platform's own synthetic per-token
+    framing the old (fallback-only) chat_completion_stream generator used.
+    """
     seeded = await seed_api_key(raw_key="sk_test_openai_stream", credits=10_000)
+    await _seed_attested_miner(seed_miner, seed_provisioned_token, model_id="demo-chat-001")
+    product_routes.set_forwarder_transport(
+        _stub_transport(content="Hello from the attested miner.", prompt_tokens=3, completion_tokens=4)
+    )
 
     response = await client.post(
         "/v1/chat/completions",
@@ -123,12 +208,19 @@ async def test_openai_chat_completion_streams_sse_chunks(client, seed_api_key):
     events = [line.removeprefix("data: ") for line in response.text.splitlines() if line.startswith("data: ")]
     assert events[-1] == "[DONE]"
     chunks = [json.loads(event) for event in events[:-1]]
-    assert chunks[0]["object"] == "chat.completion.chunk"
-    assert chunks[0]["choices"][0]["delta"] == {"role": "assistant"}
-    assert chunks[1]["choices"][0]["delta"] == {"content": "Echo: user: stream hello"}
-    assert chunks[2]["choices"][0]["finish_reason"] == "stop"
-    assert chunks[3]["choices"] == []
-    assert chunks[3]["usage"] == {
+
+    assert all(chunk["object"] == "chat.completion.chunk" for chunk in chunks)
+    assert any(
+        chunk["choices"] and chunk["choices"][0].get("delta") == {"content": "Hello from the attested miner."}
+        for chunk in chunks
+    )
+    assert any(
+        chunk["choices"] and chunk["choices"][0].get("finish_reason") == "stop"
+        for chunk in chunks
+    )
+    usage_chunks = [chunk for chunk in chunks if chunk.get("choices") == [] and chunk.get("usage")]
+    assert len(usage_chunks) == 1
+    assert usage_chunks[0]["usage"] == {
         "prompt_tokens": 3,
         "completion_tokens": 4,
         "total_tokens": 7,

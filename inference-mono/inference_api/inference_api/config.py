@@ -58,6 +58,17 @@ class Settings(BaseSettings):
 
     mesh_router_url: str | None = None
     mesh_request_timeout_seconds: int = Field(default=120, ge=1, le=600)
+    # Dev-only echo fallback (SAFE BY DEFAULT: OFF) ------------------------- #
+    # When no attested+healthy miner can serve a model, execute_inference() can
+    # fall back to an in-process "Echo: ..." response for local development
+    # convenience. This bypasses the TEE entirely and MUST NOT run unless an
+    # operator explicitly opts in here. It used to run automatically whenever
+    # app_env != "production", which let an unhosted model (or a momentarily
+    # unselectable miner for a perfectly real model) silently return a
+    # fabricated, billed HTTP 200 in every non-production environment. Off by
+    # default so a missing/forgotten env var fails closed into a proper
+    # 404 (model_not_found) / 503 (no_capacity) instead of fabricating output.
+    allow_dev_echo_fallback: bool = False
 
     # --- SERVING / COORDINATION plane ------------------------------------- #
     # Provisioner (platform -> enclave credential sealing) ----------------- #
@@ -87,6 +98,10 @@ class Settings(BaseSettings):
     provisioner_engine_name: Literal["vllm", "sglang"] = "vllm"
     # Bound wall-clock wait for the TEE engine to report ready after /engine/start.
     provisioner_engine_start_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
+    # Extra engine launch flags the platform passes to /engine/start (rendered by the TEE
+    # as --key value; underscores become dashes). Used e.g. to pin a Blackwell-correct
+    # attention backend for SGLang ({"attention_backend": "triton"}). JSON in the env var.
+    provisioner_engine_args: dict = Field(default_factory=dict)
 
     # Attestation verifier backend selection / credentials passthrough ----- #
     verifier_backend: Literal["auto", "stub", "nvidia_nras", "intel_pcs", "mock", "dev"] = "auto"
@@ -123,6 +138,29 @@ class Settings(BaseSettings):
     chain_rpc_url: str | None = None
     chain_required: bool = False
     chain_min_class: str | None = "Included"
+    # Subnet epoch derivation: epoch = block_number // epoch_length, matching the
+    # subnet's own ``Hypertensor.get_epoch``. The length is read from the chain
+    # constant ``Network::EpochLength`` and cached; this setting is the fallback
+    # used when no RPC is configured (dev/tests) and to sanity-check the read.
+    subnet_epoch_length_blocks: int = Field(default=20, ge=1)
+    subnet_block_seconds: int = Field(default=6, ge=1)
+    # How long a resolved current-epoch value may be reused before re-reading the
+    # chain. Kept well under one epoch so a stamped row lands in the right bucket.
+    subnet_epoch_cache_seconds: float = Field(default=10.0, gt=0, le=600)
+
+    # Miner statistics / signed epoch snapshots ----------------------------- #
+    miner_stats_enabled: bool = False
+    # Epochs to wait past the one being finalized before snapshotting it. The
+    # reservation-settlement and receipts-pull paths are both asynchronous, so
+    # finalizing the moment an epoch ends would publish an undercount — and a
+    # published epoch can never be corrected (it is immutable by design).
+    miner_stats_settle_lag_epochs: int = Field(default=1, ge=0, le=64)
+    # Cap on how many un-finalized past epochs one maintenance pass will close, so
+    # a long outage catches up gradually instead of stalling the whole pass.
+    miner_stats_max_finalize_per_pass: int = Field(default=8, ge=1, le=256)
+    tee_receipts_pull_enabled: bool = False
+    tee_receipts_page_limit: int = Field(default=500, ge=1, le=10_000)
+    tee_receipts_timeout_seconds: float = Field(default=15.0, gt=0, le=120)
 
     # TEE forwarding / timeouts -------------------------------------------- #
     tee_connect_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
@@ -191,6 +229,8 @@ class Settings(BaseSettings):
             raise ValueError("ALLOWED_HOSTS must be explicit in production")
         if self.rate_limit_enabled and self.rate_limit_fail_open:
             raise ValueError("RATE_LIMIT_FAIL_OPEN must be false in production")
+        if self.allow_dev_echo_fallback:
+            raise ValueError("ALLOW_DEV_ECHO_FALLBACK must not be enabled in production")
         return self
 
 

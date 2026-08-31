@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { apiErrorMessage, authApi } from "@/lib/api";
-import { AuthGate, useAuth } from "@/lib/auth";
+import { AuthGate, navigateAfterAuth, safeNextPath, useAuth } from "@/lib/auth";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -26,21 +26,26 @@ type LoginForm = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const router = useRouter();
-  const { setTokenResponse } = useAuth();
+  const { setTokenResponse, ensureSsoCookie } = useAuth();
   const form = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: "", password: "" }
   });
 
+  const onAuthenticated = async (response: Parameters<typeof setTokenResponse>[0]) => {
+    setTokenResponse(response);
+    toast.success("Logged in");
+    const next = safeNextPath(new URLSearchParams(window.location.search).get("next"));
+    // setTokenResponse mints the SSO cookie in the background; wait for it when the
+    // destination hands off to another origin (chat), or that hop sees no cookie
+    // and bounces straight back here.
+    await ensureSsoCookie();
+    navigateAfterAuth(router, next);
+  };
+
   const mutation = useMutation({
     mutationFn: authApi.login,
-    onSuccess: (response) => {
-      setTokenResponse(response);
-      toast.success("Logged in");
-      const next =
-        new URLSearchParams(window.location.search).get("next") || "/dashboard";
-      router.replace(next);
-    },
+    onSuccess: onAuthenticated,
     onError: (error) => toast.error(apiErrorMessage(error))
   });
 
@@ -48,7 +53,7 @@ export default function LoginPage() {
     <AuthGate guestOnly>
       <AuthFormShell
         title="Log in"
-        description="Use your email and password, OAuth provider, or phone OTP."
+        description="Use your email and password, or continue with Google."
         footer={
           <>
             Need an account?{" "}
@@ -96,12 +101,6 @@ export default function LoginPage() {
         <div className="grid gap-2">
           <Button variant="outline" asChild>
             <a href={authApi.oauthLoginUrl("google")}>Continue with Google</a>
-          </Button>
-          <Button variant="outline" asChild>
-            <a href={authApi.oauthLoginUrl("apple")}>Continue with Apple</a>
-          </Button>
-          <Button variant="secondary" asChild>
-            <Link href="/phone-login">Continue with phone</Link>
           </Button>
         </div>
 

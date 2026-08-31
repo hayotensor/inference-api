@@ -49,6 +49,11 @@ class MessageResponse(BaseModel):
     detail: str
 
 
+class SSOTokenResponse(BaseModel):
+    sso_token: str
+    expires_in: int
+
+
 class OAuthLoginResult(BaseModel):
     access_token: str
     refresh_token: str

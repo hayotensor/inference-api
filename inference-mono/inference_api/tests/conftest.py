@@ -1,4 +1,6 @@
+import atexit
 import os
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -9,8 +11,14 @@ from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient
 from nacl.signing import SigningKey
 
-TEST_DB_PATH = Path("/tmp/tee_inference_api_test.sqlite")
+# One SQLite file per test process. A single fixed path meant concurrent pytest
+# processes (or pytest-xdist workers) deleted and corrupted each other's database
+# mid-run, which surfaced as spurious "disk I/O error" / "readonly database"
+# failures that had nothing to do with the code under test.
+_TEST_DB_ID = os.environ.get("PYTEST_XDIST_WORKER") or str(os.getpid())
+TEST_DB_PATH = Path(tempfile.gettempdir()) / f"tee_inference_api_test_{_TEST_DB_ID}.sqlite"
 TEST_DB_PATH.unlink(missing_ok=True)
+atexit.register(TEST_DB_PATH.unlink, True)
 
 # A fixed platform provisioner Ed25519 seed + a generated Fernet key so every
 # test process agrees on the same provisioning key material.

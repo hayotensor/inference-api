@@ -23,6 +23,7 @@ import type {
   ApiKeyScope,
   ApiKeyUsageSummary,
   BalanceSyncResponse,
+  BillingInterval,
   BillingPlan,
   BillingSubscription,
   EvmNonceResponse,
@@ -33,6 +34,8 @@ import type {
   StripeSessionResponse,
   TokenResponse,
   UsageAllowance,
+  UsageByModelDetailResponse,
+  UsageByModelResponse,
   UsageHistoryResponse,
   UsagePeriod,
   User
@@ -252,6 +255,25 @@ export function apiErrorMessage(error: unknown) {
   return "Something went wrong.";
 }
 
+/**
+ * Set/refresh the httpOnly SSO cookie (via the same-origin route handler) so the
+ * edge Worker can identify this user when routing to /chat. Best-effort.
+ */
+export async function syncSsoCookie() {
+  if (typeof window === "undefined") return;
+  const token = await accessTokenForAuthenticatedRequest();
+  if (!token) return;
+  await fetch("/api/sso-cookie", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` }
+  }).catch(() => {});
+}
+
+export async function clearSsoCookie() {
+  if (typeof window === "undefined") return;
+  await fetch("/api/sso-cookie", { method: "DELETE" }).catch(() => {});
+}
+
 export const authApi = {
   register(payload: {
     email: string;
@@ -345,6 +367,24 @@ export const authApi = {
       method: "POST",
       auth: true
     });
+  },
+  walletLoginNonce(address: string) {
+    return apiRequest<{ address: string; message: string; expires_at: string }>(
+      "/auth/wallet/nonce",
+      { method: "POST", body: { address } }
+    );
+  },
+  walletLoginVerify(payload: { address: string; message: string; signature: string }) {
+    return apiRequest<TokenResponse>("/auth/wallet/verify", {
+      method: "POST",
+      body: payload
+    });
+  },
+  ssoToken() {
+    return apiRequest<{ sso_token: string; expires_in: number }>("/auth/sso/cookie", {
+      method: "POST",
+      auth: true
+    });
   }
 };
 
@@ -407,11 +447,20 @@ export const billingApi = {
   plans(options: ApiCallOptions = {}) {
     return apiRequest<BillingPlan[]>("/billing/plans", { signal: options.signal });
   },
-  checkout(planId: string) {
+  checkout(planId: string, interval: BillingInterval = "month") {
     return apiRequest<StripeSessionResponse>("/billing/stripe/checkout-session", {
       method: "POST",
       auth: true,
-      body: { plan_id: planId }
+      body: { plan_id: planId, interval }
+    });
+  },
+  // Confirms a just-completed Checkout Session directly with Stripe instead of
+  // waiting on the webhook, so /billing/success can show the new plan right away.
+  syncCheckoutSession(sessionId: string) {
+    return apiRequest<BillingSubscription>("/billing/stripe/checkout-session/sync", {
+      method: "POST",
+      auth: true,
+      body: { session_id: sessionId }
     });
   },
   portal() {
@@ -424,6 +473,13 @@ export const billingApi = {
     return apiRequest<BillingSubscription>("/billing/subscription", {
       auth: true,
       signal: options.signal
+    });
+  },
+  changePlan(planId: string, interval: BillingInterval = "month") {
+    return apiRequest<BillingSubscription>("/billing/subscription/change", {
+      method: "POST",
+      auth: true,
+      body: { plan_id: planId, interval }
     });
   },
   cancel(cancelAtPeriodEnd = true) {
@@ -453,6 +509,18 @@ export const usageApi = {
       auth: true,
       signal: options.signal
     });
+  },
+  byModel(options: ApiCallOptions = {}) {
+    return apiRequest<UsageByModelResponse>("/usage/by-model", {
+      auth: true,
+      signal: options.signal
+    });
+  },
+  byModelDetail(model: string, limit = 100, options: ApiCallOptions = {}) {
+    return apiRequest<UsageByModelDetailResponse>(
+      `/usage/by-model/${encodeURIComponent(model)}?limit=${limit}`,
+      { auth: true, signal: options.signal }
+    );
   },
   recalculate(includeBalanceSync = false) {
     return apiRequest<UsagePeriod>("/usage/recalculate", {
@@ -667,6 +735,10 @@ export const adminApi = {
     name: string;
     description?: string | null;
     stripe_price_id?: string | null;
+    stripe_annual_price_id?: string | null;
+    price_cents?: number;
+    annual_price_cents?: number | null;
+    currency?: string;
     monthly_token_allowance: number;
     active?: boolean;
     visible?: boolean;
@@ -686,6 +758,10 @@ export const adminApi = {
       name: string;
       description: string | null;
       stripe_price_id: string | null;
+      stripe_annual_price_id: string | null;
+      price_cents: number;
+      annual_price_cents: number | null;
+      currency: string;
       monthly_token_allowance: number;
       active: boolean;
       visible: boolean;

@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   BarChart3,
@@ -12,6 +15,9 @@ import {
 import { PublicNav } from "@/components/public-nav";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { apiKeysApi, billingApi, usageApi } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { formatNumber } from "@/lib/format";
 
 const capabilities = [
   {
@@ -36,7 +42,64 @@ const capabilities = [
   }
 ];
 
+// Shown to signed-out visitors only — a representative example, never presented
+// as this viewer's own data (see the "Example account" label it renders under).
+const EXAMPLE_STATS: [string, string, string][] = [
+  ["Remaining tokens", "842,400", "Current period"],
+  ["Active keys", "4", "2 live, 2 test"],
+  ["Wallet allowance", "120,000", "EVM verified"],
+  ["Subscription", "Pro", "Renews monthly"]
+];
+
 export default function HomePage() {
+  const { isAuthenticated } = useAuth();
+
+  const usageQuery = useQuery({
+    queryKey: ["usage-current"],
+    queryFn: usageApi.current,
+    enabled: isAuthenticated
+  });
+  const subscriptionQuery = useQuery({
+    queryKey: ["billing-subscription"],
+    queryFn: billingApi.subscription,
+    enabled: isAuthenticated
+  });
+  const keysQuery = useQuery({
+    queryKey: ["api-keys"],
+    queryFn: apiKeysApi.list,
+    enabled: isAuthenticated
+  });
+
+  const activeKeyCount = keysQuery.data?.filter((key) => {
+    const expired = key.expires_at ? new Date(key.expires_at).getTime() < Date.now() : false;
+    return !key.revoked_at && !expired;
+  }).length;
+
+  const stats: [string, string, string][] = isAuthenticated
+    ? [
+        [
+          "Remaining tokens",
+          usageQuery.data ? formatNumber(usageQuery.data.remaining_tokens) : "—",
+          usageQuery.data ? `${formatNumber(usageQuery.data.used_tokens)} used` : "Current period"
+        ],
+        [
+          "Active keys",
+          keysQuery.data ? formatNumber(activeKeyCount ?? 0) : "—",
+          keysQuery.data ? `${formatNumber(keysQuery.data.length)} total` : ""
+        ],
+        [
+          "Wallet allowance",
+          usageQuery.data ? formatNumber(usageQuery.data.ethereum_erc20_allowance) : "—",
+          "EVM + substrate"
+        ],
+        [
+          "Subscription",
+          subscriptionQuery.data?.plan_name ?? (subscriptionQuery.isLoading ? "—" : "Free"),
+          subscriptionQuery.data?.status ?? ""
+        ]
+      ]
+    : EXAMPLE_STATS;
+
   return (
     <div className="min-h-screen bg-background">
       <PublicNav />
@@ -74,20 +137,23 @@ export default function HomePage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium">Developer console</p>
-                    <p className="text-xs text-muted-foreground">Live account snapshot</p>
+                    <p className="text-xs text-muted-foreground">
+                      {isAuthenticated ? "Your account, live" : "Example account"}
+                    </p>
                   </div>
-                  <div className="rounded-md bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-800">
-                    Synced
+                  <div
+                    className={
+                      isAuthenticated
+                        ? "rounded-md bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-800"
+                        : "rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground"
+                    }
+                  >
+                    {isAuthenticated ? "Synced" : "Sample data"}
                   </div>
                 </div>
               </div>
               <div className="grid gap-4 p-4 sm:grid-cols-2">
-                {[
-                  ["Remaining tokens", "842,400", "Current period"],
-                  ["Active keys", "4", "2 live, 2 test"],
-                  ["Wallet allowance", "120,000", "EVM verified"],
-                  ["Subscription", "Pro", "Renews monthly"]
-                ].map(([label, value, detail]) => (
+                {stats.map(([label, value, detail]) => (
                   <Card key={label} className="shadow-none">
                     <CardContent className="p-4">
                       <p className="text-xs text-muted-foreground">{label}</p>

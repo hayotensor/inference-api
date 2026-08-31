@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { PageLoadingState } from "@/components/loading-spinner";
-import { apiErrorMessage, authApi, userApi } from "@/lib/api";
+import { apiErrorMessage, authApi, clearSsoCookie, syncSsoCookie, userApi } from "@/lib/api";
 import { authStore, tokenResponseToSession } from "@/lib/auth-store";
 import type { AuthSession, TokenResponse, User } from "@/lib/types";
 
@@ -16,9 +16,44 @@ type AuthContextValue = {
   user: User | null;
   isAuthenticated: boolean;
   setTokenResponse: (response: TokenResponse) => void;
+  setUser: (user: User) => void;
   logout: () => Promise<void>;
   refreshUser: () => Promise<User | null>;
+  /** Mint/refresh the httpOnly SSO cookie and resolve once it is set. */
+  ensureSsoCookie: () => Promise<void>;
 };
+
+/** The chat front door, which may be a path here or its own hostname. */
+const CHAT_URL = process.env.NEXT_PUBLIC_CHAT_URL || "/chat";
+
+/**
+ * Where a post-login redirect is allowed to go. `next` arrives from the chat front
+ * door bouncing an unauthenticated caller here, so it is attacker-influenced: any
+ * other absolute URL, or a protocol-relative "//host", would make this an open
+ * redirect. Exactly one off-origin destination is permitted — the chat URL this
+ * build is configured with.
+ */
+export function safeNextPath(raw: string | null | undefined, fallback = "/dashboard"): string {
+  if (!raw) return fallback;
+  if (raw === CHAT_URL) return raw;
+  if (!raw.startsWith("/") || raw.startsWith("//")) return fallback;
+  return raw;
+}
+
+/**
+ * `router.replace` cannot leave the origin, so an off-origin destination needs a
+ * real browser navigation. Everything else stays a client-side transition.
+ */
+export function navigateAfterAuth(
+  router: { replace: (path: string) => void },
+  next: string
+): void {
+  if (/^https?:\/\//.test(next)) {
+    window.location.assign(next);
+    return;
+  }
+  router.replace(next);
+}
 
 const AuthContext = React.createContext<AuthContextValue | undefined>(undefined);
 const IDENTITY_STALE_TIME_MS = 5 * 60_000;
@@ -29,24 +64,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
 
   React.useEffect(() => {
-    const syncSession = () => {
+    // `revalidate` controls whether the seeded value is stamped as already
+    // stale (`updatedAt: 0`). We still want it to paint instantly (avoiding
+    // an auth flash), but a query seeded this way is eligible for the
+    // automatic background refetch React Query performs on mount/subscribe,
+    // so a snapshot that has drifted from the server (or is just old) gets
+    // corrected without the caller having to do anything. Writes we already
+    // know are fresh -- e.g. a response we just wrote to localStorage
+    // ourselves -- should NOT be re-marked stale, or every local write would
+    // trigger a redundant extra fetch.
+    const syncSession = (revalidate: boolean) => {
       const nextSession = authStore.read();
       if (nextSession?.user) {
-        queryClient.setQueryData(["me"], nextSession.user);
+        queryClient.setQueryData(
+          ["me"],
+          nextSession.user,
+          revalidate ? { updatedAt: 0 } : undefined
+        );
       } else {
         queryClient.removeQueries({ queryKey: ["me"] });
       }
       setSession(nextSession);
     };
 
-    syncSession();
+    // Initial mount: localStorage may hold a snapshot that is minutes old,
+    // or was written by another tab, so force a real revalidation once the
+    // ["me"] query becomes enabled.
+    syncSession(true);
     setReady(true);
 
-    window.addEventListener("storage", syncSession);
-    window.addEventListener("inference-auth-changed", syncSession);
+    const handleExternalChange = () => syncSession(false);
+    window.addEventListener("storage", handleExternalChange);
+    window.addEventListener("inference-auth-changed", handleExternalChange);
     return () => {
-      window.removeEventListener("storage", syncSession);
-      window.removeEventListener("inference-auth-changed", syncSession);
+      window.removeEventListener("storage", handleExternalChange);
+      window.removeEventListener("inference-auth-changed", handleExternalChange);
     };
   }, [queryClient]);
 
@@ -77,6 +129,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       authStore.write(nextSession);
       setSession(nextSession);
       queryClient.setQueryData(["me"], response.user);
+      // Best-effort: mint the httpOnly SSO cookie so /chat SSO works.
+      void syncSsoCookie();
     },
     [queryClient]
   );
@@ -89,16 +143,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Local cleanup still needs to happen if the server-side token is already invalid.
     } finally {
       authStore.clear();
+      void clearSsoCookie();
       setSession(null);
       queryClient.clear();
     }
   }, [queryClient]);
 
+  const setUser = React.useCallback(
+    (user: User) => {
+      // Seed the cache and localStorage straight from data we already know
+      // is authoritative (e.g. a mutation's own response), rather than
+      // trusting locally-optimistic state or triggering another round-trip.
+      // `dataUpdatedAt` defaults to "now" here, which is correct: this value
+      // really was just fetched.
+      queryClient.setQueryData(["me"], user);
+      authStore.updateUser(user);
+      setSession(authStore.read());
+    },
+    [queryClient]
+  );
+
   const refreshUser = React.useCallback(async () => {
     try {
+      // `staleTime: 0` is required here: fetchQuery honors staleTime and
+      // will silently hand back a cached (possibly stale) user instead of
+      // hitting the network if the cache entry is still within its
+      // freshness window. A deliberate refresh must always talk to the
+      // server -- use refetchQueries/invalidateQueries semantics, not a
+      // conditional cache read.
       const user = await queryClient.fetchQuery({
         queryKey: ["me"],
-        queryFn: userApi.me
+        queryFn: userApi.me,
+        staleTime: 0
       });
       authStore.updateUser(user);
       setSession(authStore.read());
@@ -109,6 +185,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [queryClient]);
 
+  const ensureSsoCookie = React.useCallback(() => syncSsoCookie(), []);
+
+  // The SSO cookie is minted at login, but a session outlives it: the cookie has
+  // its own (shorter) TTL, and a deployment change — a new cookie domain, a
+  // rotated SSO_SECRET — invalidates whatever the browser already holds. Without
+  // this, an already-signed-in user can never reach chat again: the chat front
+  // door sees no valid cookie and bounces them back here.
+  const syncedTokenRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!ready) return;
+    const token = session?.accessToken ?? null;
+    if (!token) {
+      syncedTokenRef.current = null;
+      return;
+    }
+    if (syncedTokenRef.current === token) return;
+    syncedTokenRef.current = token;
+    void syncSsoCookie();
+  }, [ready, session?.accessToken]);
+
   const value = React.useMemo<AuthContextValue>(
     () => ({
       ready,
@@ -116,10 +212,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user: session?.user ?? null,
       isAuthenticated: Boolean(session?.accessToken),
       setTokenResponse,
+      setUser,
       logout,
-      refreshUser
+      refreshUser,
+      ensureSsoCookie
     }),
-    [ready, session, setTokenResponse, logout, refreshUser]
+    [ready, session, setTokenResponse, setUser, logout, refreshUser, ensureSsoCookie]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -154,7 +252,19 @@ export function AuthGate({
       router.replace(`/login?next=${next}`);
     }
     if (guestOnly && isAuthenticated) {
-      router.replace("/dashboard");
+      // Honour where the caller was headed. Dropping `next` here is what made the
+      // chat front door bounce an already-signed-in user to /dashboard forever.
+      const next = safeNextPath(new URLSearchParams(window.location.search).get("next"));
+      let cancelled = false;
+      void (async () => {
+        // The destination may leave this origin (chat), so make sure the SSO cookie
+        // exists before handing over.
+        await syncSsoCookie();
+        if (!cancelled) navigateAfterAuth(router, next);
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
   }, [guestOnly, isAuthenticated, pathname, ready, requireAuth, router]);
 

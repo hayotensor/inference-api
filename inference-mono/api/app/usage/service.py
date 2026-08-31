@@ -129,6 +129,101 @@ class UsageService:
         )
         return list(result.scalars())
 
+    async def usage_by_model(self, user: User) -> list[dict]:
+        """Per-model totals across all of the user's usage events (not period-scoped,
+        mirroring usage_history), for the per-model usage table."""
+        counted_tokens = self._counted_tokens_expr()
+        result = await self.session.execute(
+            select(
+                InferenceUsageEvent.model,
+                func.count(InferenceUsageEvent.id),
+                func.coalesce(func.sum(InferenceUsageEvent.prompt_tokens), 0),
+                func.coalesce(func.sum(InferenceUsageEvent.completion_tokens), 0),
+                func.coalesce(func.sum(counted_tokens), 0),
+                func.max(InferenceUsageEvent.created_at),
+            )
+            .where(InferenceUsageEvent.user_id == user.id)
+            .group_by(InferenceUsageEvent.model)
+            .order_by(func.coalesce(func.sum(counted_tokens), 0).desc())
+        )
+        return [
+            {
+                "model": model,
+                "request_count": request_count,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "charged_tokens": charged_tokens,
+                "last_used_at": last_used_at,
+            }
+            for (
+                model,
+                request_count,
+                prompt_tokens,
+                completion_tokens,
+                charged_tokens,
+                last_used_at,
+            ) in result.all()
+        ]
+
+    async def usage_by_model_detail(
+        self, user: User, model: str, *, limit: int = 100
+    ) -> tuple[dict, list[InferenceUsageEvent]] | None:
+        """Totals plus the most recent events for a single model. Returns None if
+        the user has no usage events for that model at all."""
+        counted_tokens = self._counted_tokens_expr()
+        summary_result = await self.session.execute(
+            select(
+                func.count(InferenceUsageEvent.id),
+                func.coalesce(func.sum(InferenceUsageEvent.prompt_tokens), 0),
+                func.coalesce(func.sum(InferenceUsageEvent.completion_tokens), 0),
+                func.coalesce(func.sum(counted_tokens), 0),
+                func.max(InferenceUsageEvent.created_at),
+            ).where(
+                InferenceUsageEvent.user_id == user.id,
+                InferenceUsageEvent.model == model,
+            )
+        )
+        request_count, prompt_tokens, completion_tokens, charged_tokens, last_used_at = (
+            summary_result.one()
+        )
+        if request_count == 0:
+            return None
+        events_result = await self.session.execute(
+            select(InferenceUsageEvent)
+            .where(
+                InferenceUsageEvent.user_id == user.id,
+                InferenceUsageEvent.model == model,
+            )
+            .order_by(InferenceUsageEvent.created_at.desc())
+            .limit(limit)
+        )
+        summary = {
+            "model": model,
+            "request_count": request_count,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "charged_tokens": charged_tokens,
+            "last_used_at": last_used_at,
+        }
+        return summary, list(events_result.scalars())
+
+    @staticmethod
+    def _counted_tokens_expr():
+        """Same "what actually counts against the allowance" semantics as
+        _period_used_tokens, reused here per-event instead of per-period."""
+        now = utcnow()
+        return case(
+            (InferenceUsageEvent.status == "settled", InferenceUsageEvent.charged_tokens),
+            (
+                and_(
+                    InferenceUsageEvent.status == "reserved",
+                    InferenceUsageEvent.expires_at > now,
+                ),
+                InferenceUsageEvent.reserved_tokens,
+            ),
+            else_=0,
+        )
+
     async def expire_stale_reservations(self, user_id: uuid.UUID | None = None) -> int:
         now = utcnow()
         statement = select(InferenceUsageEvent).where(
@@ -313,7 +408,11 @@ class UsageService:
             start, end = _weekly_period(utcnow())
         else:
             start, end = _account_creation_period(user.created_at, utcnow())
-        return start, end, None
+        # Only the period *window* falls back here. Dropping the subscription too
+        # would silently bill a customer for a paid plan while granting them the
+        # free allowance, whenever Stripe sends a subscription without period
+        # bounds (they live on the subscription item in newer API versions).
+        return start, end, active_subscription
 
     async def _active_subscription(self, user_id: uuid.UUID) -> UserSubscription | None:
         result = await self.session.execute(
@@ -387,20 +486,8 @@ class UsageService:
         return int(result.scalar_one())
 
     async def _period_used_tokens(self, usage_period_id: uuid.UUID) -> int:
-        now = utcnow()
-        counted_tokens = case(
-            (InferenceUsageEvent.status == "settled", InferenceUsageEvent.charged_tokens),
-            (
-                and_(
-                    InferenceUsageEvent.status == "reserved",
-                    InferenceUsageEvent.expires_at > now,
-                ),
-                InferenceUsageEvent.reserved_tokens,
-            ),
-            else_=0,
-        )
         result = await self.session.execute(
-            select(func.coalesce(func.sum(counted_tokens), 0)).where(
+            select(func.coalesce(func.sum(self._counted_tokens_expr()), 0)).where(
                 InferenceUsageEvent.usage_period_id == usage_period_id
             )
         )

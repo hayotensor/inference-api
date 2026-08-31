@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 class ServiceClientRole(enum.StrEnum):
     router = "router"
     miner = "miner"
+    # Trusted edge gateway (Cloudflare Worker / broker) that mints per-user
+    # managed chat keys so Open-WebUI traffic bills the right account.
+    edge = "edge"
 
 
 class ServiceClient(Base):

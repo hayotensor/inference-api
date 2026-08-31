@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -105,6 +106,10 @@ class MinerModel(Base):
     usage_chain_head: Mapped[str | None] = mapped_column(String(128))
     usage_count: Mapped[int | None] = mapped_column(Integer)
     usage_total_tokens: Mapped[int | None] = mapped_column(Integer)
+    # Exclusive cursor into this enclave's ``/usage/receipts`` feed. Persisted (not
+    # in-memory) so a platform restart resumes where it left off instead of
+    # re-reading the whole chain from row 0.
+    receipt_cursor_row_id: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(32), default="loaded", nullable=False)
     loaded: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_advertised_at: Mapped[datetime] = mapped_column(

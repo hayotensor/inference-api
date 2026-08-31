@@ -9,6 +9,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from inference_api.config import settings
 
+# Hard cap on ``InferenceRequest.prompt``. Shared with product_routes so the
+# chat-completions path (which builds an InferenceRequest by hand from OpenAI
+# messages, rather than having FastAPI bind it as the request body) can name
+# the exact same limit in its own 4xx instead of hardcoding a second copy of
+# this number that could silently drift from the one enforced here.
+PROMPT_MAX_LENGTH = 20_000
+
 
 class APIKeyUsageSummary(BaseModel):
     api_key_id: uuid.UUID
@@ -22,6 +29,12 @@ class ModelInfo(BaseModel):
     object: Literal["model"] = "model"
     created: int = 0
     owned_by: str
+    # Non-standard additive field (OpenAI clients ignore unknown keys, so this
+    # stays schema-compatible): "available" means an attested+healthy miner can
+    # serve it right now; "degraded" means it is a real, registered model whose
+    # miner(s) are currently unattested/unhealthy/stale — surfaced instead of
+    # silently dropping the model from the catalog. See product_routes.list_models.
+    status: Literal["available", "degraded"] = "available"
 
 
 class ModelListResponse(BaseModel):
@@ -31,7 +44,7 @@ class ModelListResponse(BaseModel):
 
 class InferenceRequest(BaseModel):
     model: str = "demo-inference-001"
-    prompt: str = Field(min_length=1, max_length=20_000)
+    prompt: str = Field(min_length=1, max_length=PROMPT_MAX_LENGTH)
     max_tokens: int = Field(default=128, ge=1, le=4096)
 
 
@@ -41,6 +54,11 @@ class InferenceResponse(BaseModel):
     model: str
     output: str
     usage: dict[str, int]
+    # True for a real, attested-miner-served completion. False only when the
+    # opt-in dev echo fallback answered instead (execute_inference /
+    # _execute_inference_mesh_fallback) -- an unmistakable, machine-readable
+    # signal that this output is fabricated and the TEE was bypassed.
+    attested: bool = True
 
 
 class OpenAIChatMessage(BaseModel):

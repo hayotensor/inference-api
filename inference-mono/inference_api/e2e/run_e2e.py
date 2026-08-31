@@ -206,6 +206,12 @@ def start_api(tmp: Path, logdir: Path) -> Proc:
             "PROVISIONER_SIGNING_KEY_HEX": PLATFORM_PROVISIONER_SEED.hex(),
             "PROVISIONER_VERIFY_KEY_HEX": PLATFORM_PROVISIONER_VERIFY_KEY_HEX,
             "PROVISIONER_TOKEN_ENCRYPTION_KEY": fernet_key,
+            # --- miner statistics plane (the scoring input) ---
+            # The maintenance loop runs receipts reconciliation then epoch finalization;
+            # the driver also invokes both directly so the run is deterministic.
+            "MINER_STATS_ENABLED": "true",
+            "TEE_RECEIPTS_PULL_ENABLED": "true",
+            "MAINTENANCE_INTERVAL_SECONDS": "5",
         }
     )
 
@@ -361,6 +367,92 @@ async def main():
 
 asyncio.run(main())
 '''
+
+MINER_STATS_SNIPPET = r'''
+"""Drive the statistics pipeline synchronously and report what it produced.
+
+Runs in the API process's environment (same DB, same platform signing key) so the
+receipts pull talks to the REAL dev TEE over HTTP and the artifact is signed by the
+REAL platform key — the same path the maintenance loop takes, just on demand so the
+E2E is deterministic rather than waiting on a timer.
+"""
+import asyncio, json, sys
+from sqlalchemy import select
+
+from talaris_contracts import verify_miner_stats
+
+from inference_api.db import async_session_maker
+from inference_api.miners.receipts import TeeReceiptsCollector
+from inference_api.models import MinerRequestStat
+from inference_api.provisioner.key import provisioner_verify_key_hex
+from inference_api.stats_service import MinerEpochStatsService
+
+EPOCH = int(sys.argv[1])
+
+
+async def main():
+    out = {}
+    async with async_session_maker() as session:
+        # Stamp the epoch onto the rows the request path wrote (no chain RPC here, so
+        # they were written unstamped) and reconcile against the enclave chain.
+        rows = list((await session.execute(select(MinerRequestStat))).scalars())
+        for row in rows:
+            row.epoch = EPOCH
+            session.add(row)
+        await session.flush()
+
+        summary = await TeeReceiptsCollector(session).collect_all()
+        out["receipts"] = {
+            "models_ok": summary.models_ok,
+            "models_skipped": summary.models_skipped,
+            "skips": [r.skipped for r in summary.results if r.skipped],
+            "rows_verified": summary.rows_verified,
+        }
+        await session.commit()
+
+    async with async_session_maker() as session:
+        artifact = await MinerEpochStatsService(session).finalize(EPOCH)
+        await session.commit()
+
+    async with async_session_maker() as session:
+        rows = list((await session.execute(select(MinerRequestStat))).scalars())
+        out["attempts"] = [
+            {
+                "outcome": r.outcome,
+                "epoch": r.epoch,
+                "hotkey": r.miner_hotkey,
+                "verified": bool(r.verified),
+                "latency_ms": r.latency_ms,
+                "total_tokens": r.total_tokens,
+            }
+            for r in rows
+        ]
+        # Re-read through the service: proves the SERVED bytes are the stored ones.
+        served = await MinerEpochStatsService(session).get(EPOCH)
+
+    out["artifact"] = {
+        "epoch": served.epoch,
+        "version": served.version,
+        "signature": served.signature,
+        "entries": [
+            {
+                "hotkey": e.hotkey,
+                "requests_ok": e.requests_ok,
+                "requests_failed": e.requests_failed,
+                "verified_total_tokens": e.verified_total_tokens,
+                "usage_count_end": e.usage_count_end,
+            }
+            for e in served.entries
+        ],
+        "verifies_under_platform_key": verify_miner_stats(served, provisioner_verify_key_hex()),
+        "stable_bytes": served.canonical_message() == artifact.canonical_message(),
+    }
+    print("RESULT:" + json.dumps(out))
+
+
+asyncio.run(main())
+'''
+
 
 BILLING_SNIPPET = r'''
 import asyncio, json, sys
@@ -702,6 +794,61 @@ def main() -> int:
         check(period2["remaining_tokens"] == period2["total_allowance"] - 2 * EXPECTED_TOTAL_TOKENS,
               "remaining credits decreased by both charges")
 
+        # --- 8b. miner statistics: record -> reconcile -> finalize -> serve --- #
+        log("driving the miner-statistics pipeline (receipts + epoch finalization)...")
+        stats = db_query(api_env, MINER_STATS_SNIPPET, "41")
+        log(f"statistics: {json.dumps(stats['receipts'])}")
+
+        attempts = stats["attempts"]
+        check(len(attempts) >= 2,
+              f"a miner_request_stats row per forward attempt exists (got {len(attempts)})")
+        check(all(a["outcome"] == "success" for a in attempts),
+              "every attempt in this run was recorded as a success")
+        check(all(a["hotkey"] == hotkey for a in attempts),
+              "attempts are attributed to the registered miner hotkey")
+        check(all(a["latency_ms"] is not None for a in attempts),
+              "each attempt carries a platform-MEASURED latency (not an estimate)")
+        check(all(a["total_tokens"] == EXPECTED_TOTAL_TOKENS for a in attempts),
+              f"each attempt recorded total_tokens == {EXPECTED_TOTAL_TOKENS}")
+
+        # Reconciliation against the REAL enclave receipt chain over HTTP.
+        check(stats["receipts"]["models_skipped"] == 0,
+              f"no model was skipped during the receipts pull (skips={stats['receipts']['skips']})")
+        verified = [a for a in attempts if a["verified"]]
+        check(len(verified) == len(attempts),
+              f"every attempt was corroborated by the enclave's signed chain "
+              f"({len(verified)}/{len(attempts)})")
+
+        artifact = stats["artifact"]
+        log(f"signed artifact: {json.dumps(artifact)}")
+        check(artifact["epoch"] == 41, "artifact is for the finalized epoch")
+        check(artifact["verifies_under_platform_key"],
+              "artifact signature verifies under the PINNED platform provisioner key")
+        check(artifact["stable_bytes"],
+              "re-reading a finalized epoch returns byte-identical signed bytes")
+        entries = artifact["entries"]
+        check(len(entries) == 1, f"exactly one (hotkey, model) entry (got {len(entries)})")
+        entry = entries[0]
+        check(entry["hotkey"] == hotkey.lower(), "artifact entry names the serving miner")
+        check(entry["requests_ok"] == len(attempts),
+              f"artifact requests_ok == {len(attempts)}")
+        check(entry["requests_failed"] == 0, "artifact requests_failed == 0")
+        check(entry["verified_total_tokens"] == len(attempts) * EXPECTED_TOTAL_TOKENS,
+              f"artifact verified_total_tokens == {len(attempts) * EXPECTED_TOTAL_TOKENS} "
+              "(only enclave-corroborated tokens count)")
+        check(entry["usage_count_end"] is not None,
+              "artifact carries the enclave's cumulative usage anchor")
+
+        # And the public endpoint serves the same signed artifact, unauthenticated.
+        with httpx.Client(base_url=API_BASE, timeout=10.0) as c:
+            served = c.get("/subnet/stats/41")
+            missing = c.get("/subnet/stats/9999")
+        check(served.status_code == 200, f"GET /subnet/stats/41 -> 200 (got {served.status_code})")
+        check(served.json()["signature"] == artifact["signature"],
+              "the endpoint serves the SAME signature the service stored")
+        check(missing.status_code == 404,
+              "an unfinalized epoch 404s (validators treat it as 'come back later')")
+
         # --- 9. report PASS --- #
         print("", flush=True)
         print("=" * 70, flush=True)
@@ -718,6 +865,10 @@ def main() -> int:
               f"(= 2 x {EXPECTED_TOTAL_TOKENS})", flush=True)
         print(f"  credits remaining   : {period2['remaining_tokens']}", flush=True)
         print(f"  serving miner hotkey: {hotkey}", flush=True)
+        print(f"  recorded attempts   : {len(attempts)} (all verified against the enclave chain)",
+              flush=True)
+        print(f"  signed epoch 41     : verified_total_tokens={entry['verified_total_tokens']} "
+              f"requests_ok={entry['requests_ok']}", flush=True)
         print("=" * 70, flush=True)
         rc = 0
     except Exception as exc:  # noqa: BLE001

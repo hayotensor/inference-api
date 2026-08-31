@@ -17,7 +17,31 @@ class SMSProvider(Protocol):
 
 class ConsoleSMSProvider:
     async def send_sms(self, phone_number: str, message: str) -> None:
-        logger.info("sms.console", extra={"phone_number": phone_number, "message": message})
+        # NOTE: the extra key is "text", not "message" -- "message" is a
+        # reserved `LogRecord` attribute, and passing it via `extra=` makes
+        # stdlib logging raise `KeyError: "Attempt to overwrite 'message' in
+        # LogRecord"` on every call. This mirrors the established pattern in
+        # app/email/providers.py's ConsoleEmailProvider (extra={"to", ...,
+        # "text": message.text}).
+        try:
+            logger.info(
+                "sms.console", extra={"phone_number": phone_number, "text": message}
+            )
+        except Exception:
+            # Defensive guard: this provider's only job is to make the OTP
+            # discoverable in the console for dev/test. A future logging
+            # mistake (another reserved-key collision, a bad formatter, etc.)
+            # must never again turn into an unhandled 500 on an
+            # unauthenticated auth endpoint. Fall back to an unstructured
+            # log record -- the OTP stays discoverable, and the logging bug
+            # itself is still surfaced (at WARNING, with a traceback) instead
+            # of silently vanishing.
+            logger.warning(
+                "sms.console.log_failed phone_number=%s text=%s",
+                phone_number,
+                message,
+                exc_info=True,
+            )
 
 
 class TwilioSMSProvider:

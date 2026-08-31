@@ -18,9 +18,6 @@ export function PublicNav() {
           <Link href="/pricing" className="hover:text-foreground">
             Pricing
           </Link>
-          <Link href="/phone-login" className="hover:text-foreground">
-            Phone login
-          </Link>
         </nav>
         <div className="flex items-center gap-2">
           {isAuthenticated ? (

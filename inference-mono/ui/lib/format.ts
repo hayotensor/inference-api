@@ -15,6 +15,20 @@ export function formatCompact(value: number | string | null | undefined) {
   }).format(numeric);
 }
 
+export function formatMoney(
+  cents: number | null | undefined,
+  currency: string | null | undefined = "usd"
+) {
+  if (cents === null || cents === undefined || !Number.isFinite(cents)) return "\u2014";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: (currency || "usd").toUpperCase(),
+    // Whole-dollar prices read better without ".00"; keep cents when they matter.
+    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2
+  }).format(cents / 100);
+}
+
 export function formatDate(value: string | null | undefined) {
   if (!value) return "Not set";
   const date = new Date(value);
@@ -37,6 +51,16 @@ export function formatDateTime(value: string | null | undefined) {
     hour: "numeric",
     minute: "2-digit"
   }).format(date);
+}
+
+export function formatRatePerMillion(
+  cents: number | null | undefined,
+  tokens: number | null | undefined,
+  currency: string | null | undefined = "usd"
+) {
+  if (!cents || !tokens) return null;
+  const perMillionCents = (cents / tokens) * 1_000_000;
+  return `${formatMoney(Math.round(perMillionCents), currency)} / million tokens`;
 }
 
 export function formatPercent(used: number, total: number) {

@@ -89,3 +89,13 @@ def synthetic_phone_email(phone_number: str) -> str:
 def is_synthetic_phone_email(email: str) -> bool:
     local_part, _, domain = email.lower().partition("@")
     return local_part.startswith("phone_") and domain == settings.phone_user_email_domain.lower()
+
+
+def synthetic_wallet_email(address: str) -> str:
+    digest = keyed_hash(f"wallet-email:{address.lower()}")[:32]
+    return f"wallet_{digest}@{settings.wallet_user_email_domain}"
+
+
+def is_synthetic_wallet_email(email: str) -> bool:
+    local_part, _, domain = email.lower().partition("@")
+    return local_part.startswith("wallet_") and domain == settings.wallet_user_email_domain.lower()

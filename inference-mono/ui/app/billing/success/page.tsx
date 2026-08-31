@@ -1,10 +1,12 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2 } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CheckCircle2, Loader2 } from "lucide-react";
 
-import { ErrorState, LoadingState } from "@/components/data-state";
+import { ErrorState } from "@/components/data-state";
 import { PublicNav } from "@/components/public-nav";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,13 +14,82 @@ import { billingApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 
+// Stripe's webhook can take a few seconds to reach us. `session_id` (appended to
+// the success redirect) lets us confirm the payment directly instead of waiting
+// on it; the interval below is a fallback for the rare case that fails too (or
+// for anyone who lands here without a session_id) so the page still catches the
+// webhook's own update instead of sitting on a stale "Free" forever.
+const POLL_ATTEMPTS = 8;
+const POLL_INTERVAL_MS = 2000;
+
 export default function BillingSuccessPage() {
+  return (
+    <React.Suspense fallback={<BillingSuccessFallback />}>
+      <BillingSuccessContent />
+    </React.Suspense>
+  );
+}
+
+function BillingSuccessFallback() {
+  return (
+    <div className="min-h-screen bg-muted/30">
+      <PublicNav />
+      <main className="page-shell flex min-h-[calc(100vh-4rem)] items-center justify-center py-10">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </main>
+    </div>
+  );
+}
+
+function BillingSuccessContent() {
   const { isAuthenticated } = useAuth();
+  const searchParams = useSearchParams();
+  const sessionId = searchParams.get("session_id");
+  const queryClient = useQueryClient();
+  const syncStarted = React.useRef(false);
+  const pollAttempts = React.useRef(0);
+
+  const syncMutation = useMutation({
+    mutationFn: (id: string) => billingApi.syncCheckoutSession(id),
+    onSuccess: (data) => {
+      // Written straight into the shared cache key so every page reading
+      // ["billing-subscription"] — not just this one — reflects it immediately.
+      queryClient.setQueryData(["billing-subscription"], data);
+      void queryClient.invalidateQueries({ queryKey: ["usage-allowance"] });
+    }
+  });
+
+  React.useEffect(() => {
+    if (!isAuthenticated || !sessionId || syncStarted.current) return;
+    syncStarted.current = true;
+    syncMutation.mutate(sessionId);
+    // syncMutation is a stable ref from useMutation; only re-run if the inputs change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, sessionId]);
+
   const subscriptionQuery = useQuery({
     queryKey: ["billing-subscription"],
     queryFn: billingApi.subscription,
-    enabled: isAuthenticated
+    enabled: isAuthenticated,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      if (status && status !== "free") return false;
+      if (pollAttempts.current >= POLL_ATTEMPTS) return false;
+      pollAttempts.current += 1;
+      return POLL_INTERVAL_MS;
+    }
   });
+
+  const stillConfirming =
+    isAuthenticated &&
+    (syncMutation.isPending ||
+      (subscriptionQuery.data?.status === "free" &&
+        (subscriptionQuery.isFetching || pollAttempts.current < POLL_ATTEMPTS)));
+  const gaveUpConfirming =
+    isAuthenticated &&
+    !stillConfirming &&
+    subscriptionQuery.data?.status === "free" &&
+    pollAttempts.current >= POLL_ATTEMPTS;
 
   return (
     <div className="min-h-screen bg-muted/30">
@@ -31,13 +102,37 @@ export default function BillingSuccessPage() {
             <p className="mt-2 text-sm text-muted-foreground">
               Stripe redirected back successfully. Subscription state is refetched from the API.
             </p>
-            {isAuthenticated && subscriptionQuery.isLoading ? (
-              <LoadingState />
+
+            {stillConfirming ? (
+              <div className="mt-6 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Confirming your payment with Stripe…
+              </div>
             ) : null}
+
+            {gaveUpConfirming ? (
+              <div className="mt-6 rounded-lg border border-amber-300/50 bg-amber-50 p-4 text-left text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                Stripe hasn&apos;t confirmed this payment with us yet. This can happen if the
+                webhook is delayed — try refreshing in a moment, or check the billing dashboard.
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-3"
+                  onClick={() => {
+                    pollAttempts.current = 0;
+                    void subscriptionQuery.refetch();
+                  }}
+                >
+                  Check again
+                </Button>
+              </div>
+            ) : null}
+
             {isAuthenticated && subscriptionQuery.isError ? (
-              <ErrorState error={subscriptionQuery.error} />
+              <ErrorState error={subscriptionQuery.error} onRetry={() => void subscriptionQuery.refetch()} />
             ) : null}
-            {subscriptionQuery.data ? (
+
+            {subscriptionQuery.data && !stillConfirming ? (
               <div className="mt-6 rounded-lg border bg-muted/40 p-4 text-left text-sm">
                 <div className="flex justify-between gap-4">
                   <span className="text-muted-foreground">Status</span>
@@ -55,6 +150,7 @@ export default function BillingSuccessPage() {
                 </div>
               </div>
             ) : null}
+
             <Button className="mt-6" asChild>
               <Link href="/dashboard/billing">Open billing</Link>
             </Button>

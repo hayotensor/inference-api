@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing.plans import seed_default_billing_plans
 from app.billing.stripe import StripeClient
-from app.core.errors import bad_request, not_found
+from app.core.errors import bad_request, forbidden, not_found
 from app.core.security import utcnow
 from app.db.models.billing_plan import BillingPlan
 from app.db.models.stripe_webhook_event import StripeWebhookEvent
@@ -24,15 +25,34 @@ def _obj_get(value: Any, key: str, default: Any = None) -> Any:
     return getattr(value, key, default)
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    """The SDK's `StripeObject` is not a dict and exposes no `keys()`/`items()`/`get()`,
+    so `dict(obj)` raises KeyError instead of copying it. Real webhook payloads arrive
+    as these objects; hand-built dicts (tests, internal calls) must keep working too."""
+    if isinstance(value, dict):
+        return dict(value)
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        converted = to_dict()
+        if isinstance(converted, dict):
+            return dict(converted)
+    return {}
+
+
 def _metadata(value: Any) -> dict[str, Any]:
-    metadata = _obj_get(value, "metadata", {}) or {}
-    return dict(metadata)
+    return _as_dict(_obj_get(value, "metadata", {}) or {})
 
 
 def _stripe_timestamp(value: Any) -> datetime | None:
     if value in (None, ""):
         return None
     return datetime.fromtimestamp(int(value), tz=UTC)
+
+
+# How long a pending Checkout Session marker is trusted without Stripe confirming
+# it, if Stripe itself can't be reached to check. This is a fallback only — the
+# normal path always asks Stripe for the session's live status.
+_PENDING_CHECKOUT_STALE_AFTER = timedelta(minutes=30)
 
 
 def _first_subscription_item(subscription: Any) -> Any | None:
@@ -74,29 +94,133 @@ class BillingService:
         )
         return list(result.scalars())
 
-    async def create_checkout_session(self, user: User, plan_id: uuid.UUID) -> dict[str, Any]:
+    async def _plan_and_price(self, plan_id: uuid.UUID, interval: str) -> tuple[BillingPlan, str]:
         await seed_default_billing_plans(self.session)
         plan = await self.session.get(BillingPlan, plan_id)
         if plan is None or not plan.active or not plan.visible:
             raise not_found("Billing plan not found")
-        if not plan.stripe_price_id:
-            raise bad_request("stripe_price_missing", "Billing plan is missing a Stripe price ID")
+        if interval not in ("month", "year"):
+            raise bad_request("invalid_interval", "Billing interval must be 'month' or 'year'")
+        price_id = plan.stripe_annual_price_id if interval == "year" else plan.stripe_price_id
+        if not price_id:
+            raise bad_request(
+                "stripe_price_missing",
+                f"Billing plan is missing a Stripe {interval}ly price ID",
+            )
+        return plan, price_id
+
+    async def create_checkout_session(
+        self, user: User, plan_id: uuid.UUID, interval: str = "month"
+    ) -> dict[str, Any]:
+        plan, price_id = await self._plan_and_price(plan_id, interval)
 
         active_subscription = await self._active_subscription(user.id)
         if active_subscription is not None:
             raise bad_request(
                 "subscription_exists",
-                "Use the Stripe customer portal to change an existing subscription",
+                "This account already has a subscription; change it from the billing dashboard",
             )
 
         account = await self.ensure_billing_account(user)
+        await self._reject_if_checkout_pending(account)
+
         session = self.stripe_client.create_checkout_session(
             customer_id=account.stripe_customer_id or "",
-            price_id=plan.stripe_price_id,
+            price_id=price_id,
             user_id=str(user.id),
             plan_id=str(plan.id),
         )
+        account.pending_checkout_session_id = session["id"]
+        account.pending_checkout_session_created_at = utcnow()
+        self.session.add(account)
+        await self.session.flush()
         return {"id": session["id"], "url": session["url"]}
+
+    async def _reject_if_checkout_pending(self, account: UserBillingAccount) -> None:
+        """A Checkout Session already open for this account blocks a new one.
+        Without this, a double-click, a second tab, or a retry before the webhook
+        has synced the first payment could open two sessions for the same
+        subscription and get the customer billed twice."""
+        session_id = account.pending_checkout_session_id
+        if not session_id:
+            return
+        try:
+            existing = self.stripe_client.retrieve_checkout_session(session_id)
+            status = _obj_get(existing, "status")
+        except Exception:
+            # Stripe unreachable/erroring — don't let that wedge checkout forever;
+            # fall back to treating the marker as stale after a while.
+            status = None
+
+        if status == "open":
+            raise bad_request(
+                "checkout_session_pending",
+                "A checkout session is already open for this account; complete or close it first",
+            )
+        if status in ("complete", "expired"):
+            account.pending_checkout_session_id = None
+            account.pending_checkout_session_created_at = None
+            self.session.add(account)
+            await self.session.flush()
+            return
+
+        created_at = account.pending_checkout_session_created_at
+        if created_at is not None and utcnow() - created_at < _PENDING_CHECKOUT_STALE_AFTER:
+            raise bad_request(
+                "checkout_session_pending",
+                "A checkout session is already open for this account; complete or close it first",
+            )
+        account.pending_checkout_session_id = None
+        account.pending_checkout_session_created_at = None
+        self.session.add(account)
+        await self.session.flush()
+
+    async def sync_checkout_session_by_id(self, user: User, session_id: str) -> dict[str, Any]:
+        """Confirm and apply a checkout without waiting on the webhook. The success
+        page calls this as soon as Stripe redirects back so the new plan shows up
+        immediately; the webhook still runs and lands on the same idempotent sync,
+        so a slow or duplicate delivery of it is harmless."""
+        checkout_session = self.stripe_client.retrieve_checkout_session(session_id)
+        metadata = _metadata(checkout_session)
+        owner = metadata.get("user_id") or _obj_get(checkout_session, "client_reference_id")
+        if not owner or uuid.UUID(str(owner)) != user.id:
+            raise forbidden("This checkout session does not belong to your account")
+        await self.sync_checkout_session(checkout_session)
+        return await self.subscription_response(user)
+
+    async def change_subscription_plan(
+        self, user: User, plan_id: uuid.UUID, interval: str = "month"
+    ) -> UserSubscription:
+        """Move an existing subscription to another plan or interval. Stripe's customer
+        portal can do this too, but only when the account has portal plan-switching
+        configured — this path always works."""
+        plan, price_id = await self._plan_and_price(plan_id, interval)
+        subscription = await self._active_subscription(user.id)
+        if subscription is None or not subscription.stripe_subscription_id:
+            raise bad_request(
+                "no_active_subscription",
+                "There is no active subscription to change; start one from checkout",
+            )
+        if subscription.stripe_price_id == price_id:
+            raise bad_request("already_on_plan", "The subscription is already on this plan and interval")
+
+        stripe_subscription = self.stripe_client.retrieve_subscription(
+            subscription.stripe_subscription_id
+        )
+        item = _first_subscription_item(stripe_subscription)
+        item_id = _obj_get(item, "id") if item is not None else None
+        if not item_id:
+            raise bad_request("stripe_item_missing", "Stripe subscription has no line item to update")
+
+        updated = self.stripe_client.update_subscription_price(
+            subscription_id=subscription.stripe_subscription_id,
+            subscription_item_id=str(item_id),
+            price_id=price_id,
+            user_id=str(user.id),
+            plan_id=str(plan.id),
+        )
+        synced = await self.sync_subscription_object(updated)
+        return synced or subscription
 
     async def create_customer_portal_session(self, user: User) -> dict[str, Any]:
         account = await self.ensure_billing_account(user)
@@ -133,15 +257,29 @@ class BillingService:
         if subscription is None:
             return {"status": "free"}
         plan_name = None
+        interval: str | None = None
+        amount_cents: int | None = None
+        currency: str | None = None
         if subscription.plan_id is not None:
             plan = await self.session.get(BillingPlan, subscription.plan_id)
-            plan_name = plan.name if plan else None
+            if plan is not None:
+                plan_name = plan.name
+                currency = plan.currency
+                if subscription.stripe_price_id and subscription.stripe_price_id == plan.stripe_annual_price_id:
+                    interval = "year"
+                    amount_cents = plan.annual_price_cents
+                elif subscription.stripe_price_id and subscription.stripe_price_id == plan.stripe_price_id:
+                    interval = "month"
+                    amount_cents = plan.price_cents
         return {
             "id": subscription.id,
             "stripe_subscription_id": subscription.stripe_subscription_id,
             "stripe_price_id": subscription.stripe_price_id,
             "plan_id": subscription.plan_id,
             "plan_name": plan_name,
+            "interval": interval,
+            "amount_cents": amount_cents,
+            "currency": currency,
             "status": subscription.status,
             "current_period_start": subscription.current_period_start,
             "current_period_end": subscription.current_period_end,
@@ -201,11 +339,30 @@ class BillingService:
         customer_id = _obj_get(checkout_session, "customer")
         if user_id and customer_id:
             await self._upsert_billing_account(uuid.UUID(str(user_id)), str(customer_id))
+        if user_id:
+            await self._clear_pending_checkout(
+                uuid.UUID(str(user_id)), _obj_get(checkout_session, "id")
+            )
         subscription = _obj_get(checkout_session, "subscription")
         if subscription:
             if isinstance(subscription, str):
                 subscription = self.stripe_client.retrieve_subscription(subscription)
             await self.sync_subscription_object(subscription)
+
+    async def _clear_pending_checkout(self, user_id: uuid.UUID, session_id: Any) -> None:
+        if not session_id:
+            return
+        account = (
+            await self.session.execute(
+                select(UserBillingAccount).where(UserBillingAccount.user_id == user_id)
+            )
+        ).scalar_one_or_none()
+        if account is None or account.pending_checkout_session_id != str(session_id):
+            return
+        account.pending_checkout_session_id = None
+        account.pending_checkout_session_created_at = None
+        self.session.add(account)
+        await self.session.flush()
 
     async def sync_invoice_subscription(self, invoice: Any, event_type: str) -> None:
         subscription_id = _obj_get(invoice, "subscription")
@@ -249,6 +406,7 @@ class BillingService:
                 select(UserSubscription).where(UserSubscription.user_id == user_id)
             )
         ).scalar_one_or_none()
+        is_new = existing is None
         if existing is None:
             existing = UserSubscription(user_id=user_id)
         existing.stripe_subscription_id = stripe_subscription_id
@@ -258,8 +416,42 @@ class BillingService:
         existing.current_period_start = _subscription_item_period(subscription_object, "current_period_start")
         existing.current_period_end = _subscription_item_period(subscription_object, "current_period_end")
         existing.cancel_at_period_end = bool(_obj_get(subscription_object, "cancel_at_period_end", False))
-        self.session.add(existing)
-        await self.session.flush()
+
+        try:
+            # The SAVEPOINT must open before `existing` is added — begin_nested()
+            # itself autoflushes whatever is already pending as it establishes the
+            # savepoint, which would run the INSERT *before* the savepoint exists
+            # and poison the whole transaction instead of just this nested one.
+            async with self.session.begin_nested():
+                self.session.add(existing)
+                await self.session.flush()
+        except IntegrityError:
+            if not is_new:
+                raise
+            # Stripe can deliver more than one event for the same subscription
+            # (checkout.session.completed, customer.subscription.created, the
+            # webhook racing the /billing/success sync call) as concurrent
+            # requests. Both can see "no row yet" for this user and both try to
+            # INSERT — the loser lands here and just needs to update the row the
+            # winner committed instead of crashing the request. The failed
+            # insert's object was rolled back with the savepoint, so re-fetch.
+            existing = (
+                await self.session.execute(
+                    select(UserSubscription).where(
+                        UserSubscription.stripe_subscription_id == stripe_subscription_id
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                raise
+            existing.stripe_price_id = price_id
+            existing.plan_id = plan_id
+            existing.status = status
+            existing.current_period_start = _subscription_item_period(subscription_object, "current_period_start")
+            existing.current_period_end = _subscription_item_period(subscription_object, "current_period_end")
+            existing.cancel_at_period_end = bool(_obj_get(subscription_object, "cancel_at_period_end", False))
+            self.session.add(existing)
+            await self.session.flush()
 
         user = await self.session.get(User, user_id)
         if user is not None:
@@ -286,17 +478,27 @@ class BillingService:
     async def _plan_id_for_subscription(
         self, subscription_object: Any, price_id: str | None
     ) -> uuid.UUID | None:
-        metadata = _metadata(subscription_object)
-        plan_id = metadata.get("plan_id")
-        if plan_id:
-            return uuid.UUID(str(plan_id))
+        # The current price is the authoritative answer to "which plan is this
+        # subscription actually on" — metadata.plan_id is only set once, at
+        # Checkout creation, and goes stale the moment the subscription is moved
+        # to a different price (a plan switch keeps paying customers on the old
+        # plan's allowance forever if metadata is trusted over the live price).
         if price_id:
+            # A webhook can be the first billing traffic a fresh database sees, and
+            # the price -> plan lookup below needs the catalog to exist.
+            await seed_default_billing_plans(self.session)
             result = await self.session.execute(
-                select(BillingPlan).where(BillingPlan.stripe_price_id == price_id)
+                select(BillingPlan).where(
+                    (BillingPlan.stripe_price_id == price_id)
+                    | (BillingPlan.stripe_annual_price_id == price_id)
+                )
             )
             plan = result.scalar_one_or_none()
-            return plan.id if plan else None
-        return None
+            if plan is not None:
+                return plan.id
+        metadata = _metadata(subscription_object)
+        plan_id = metadata.get("plan_id")
+        return uuid.UUID(str(plan_id)) if plan_id else None
 
     async def _active_subscription(self, user_id: uuid.UUID) -> UserSubscription | None:
         result = await self.session.execute(

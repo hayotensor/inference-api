@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { adminApi, apiErrorMessage } from "@/lib/api";
-import { formatDateTime, formatNumber } from "@/lib/format";
+import { formatDateTime, formatMoney, formatNumber } from "@/lib/format";
 import type { AdminBillingPlan } from "@/lib/types";
 
 const limit = 25;
@@ -50,6 +50,10 @@ const planSchema = z.object({
   name: z.string().min(1).max(80),
   description: z.string().max(512).optional(),
   stripe_price_id: z.string().max(255).optional(),
+  stripe_annual_price_id: z.string().max(255).optional(),
+  price_cents: z.coerce.number().int().min(0),
+  annual_price_cents: z.coerce.number().int().min(0),
+  currency: z.string().length(3),
   monthly_token_allowance: z.coerce.number().int().min(0),
   active: z.enum(["true", "false"]),
   visible: z.enum(["true", "false"]),
@@ -65,6 +69,10 @@ function formValues(plan: AdminBillingPlan | null): PlanForm {
     name: plan?.name ?? "",
     description: plan?.description ?? "",
     stripe_price_id: plan?.stripe_price_id ?? "",
+    stripe_annual_price_id: plan?.stripe_annual_price_id ?? "",
+    price_cents: plan?.price_cents ?? 0,
+    annual_price_cents: plan?.annual_price_cents ?? 0,
+    currency: plan?.currency ?? "usd",
     monthly_token_allowance: plan?.monthly_token_allowance ?? 0,
     active: plan?.active === false ? "false" : "true",
     visible: plan?.visible === false ? "false" : "true",
@@ -122,6 +130,10 @@ export default function AdminBillingPlansPage() {
         name: values.name,
         description: values.description || null,
         stripe_price_id: values.stripe_price_id || null,
+        stripe_annual_price_id: values.stripe_annual_price_id || null,
+        price_cents: values.price_cents,
+        annual_price_cents: values.annual_price_cents || null,
+        currency: values.currency,
         monthly_token_allowance: values.monthly_token_allowance,
         active: values.active === "true",
         visible: values.visible === "true",
@@ -144,6 +156,10 @@ export default function AdminBillingPlansPage() {
             name: values.name,
             description: values.description || null,
             stripe_price_id: values.stripe_price_id || null,
+            stripe_annual_price_id: values.stripe_annual_price_id || null,
+            price_cents: values.price_cents,
+            annual_price_cents: values.annual_price_cents || null,
+            currency: values.currency,
             monthly_token_allowance: values.monthly_token_allowance,
             active: values.active === "true",
             visible: values.visible === "true",
@@ -246,7 +262,8 @@ export default function AdminBillingPlansPage() {
                 <TableRow>
                   <TableHead>Plan</TableHead>
                   <TableHead>Allowance</TableHead>
-                  <TableHead>Stripe price</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead>Stripe price IDs</TableHead>
                   <TableHead>State</TableHead>
                   <TableHead>Features</TableHead>
                   <TableHead>Updated</TableHead>
@@ -261,7 +278,20 @@ export default function AdminBillingPlansPage() {
                       <div className="text-xs text-muted-foreground">{plan.slug}</div>
                     </TableCell>
                     <TableCell>{formatNumber(plan.monthly_token_allowance)}</TableCell>
-                    <TableCell className="max-w-48 truncate">{plan.stripe_price_id ?? "None"}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      <div>{formatMoney(plan.price_cents, plan.currency)} / mo</div>
+                      <div className="text-xs text-muted-foreground">
+                        {plan.annual_price_cents
+                          ? `${formatMoney(plan.annual_price_cents, plan.currency)} / yr`
+                          : "no annual price"}
+                      </div>
+                    </TableCell>
+                    <TableCell className="max-w-48">
+                      <div className="truncate text-xs">{plan.stripe_price_id ?? "None"}</div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {plan.stripe_annual_price_id ?? "None"}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
                         <Badge variant={plan.active ? "success" : "destructive"}>
@@ -346,8 +376,20 @@ export default function AdminBillingPlansPage() {
               <LabeledControl label="Monthly token allowance">
                 <Input type="number" min={0} {...form.register("monthly_token_allowance")} />
               </LabeledControl>
-              <LabeledControl label="Stripe price ID">
+              <LabeledControl label="Stripe price ID (monthly)">
                 <Input {...form.register("stripe_price_id")} />
+              </LabeledControl>
+              <LabeledControl label="Stripe price ID (annual)">
+                <Input {...form.register("stripe_annual_price_id")} />
+              </LabeledControl>
+              <LabeledControl label="Monthly price (cents)">
+                <Input type="number" min={0} {...form.register("price_cents")} />
+              </LabeledControl>
+              <LabeledControl label="Annual price (cents)">
+                <Input type="number" min={0} {...form.register("annual_price_cents")} />
+              </LabeledControl>
+              <LabeledControl label="Currency">
+                <Input maxLength={3} {...form.register("currency")} />
               </LabeledControl>
               <LabeledControl label="Sort order">
                 <Input type="number" {...form.register("sort_order")} />

@@ -21,6 +21,15 @@ DEGRADED = "degraded"
 UNHEALTHY = "unhealthy"
 UNKNOWN = "unknown"
 
+# Bounds on self-reported capacity (see ``_sanitize_capacity``). A miner has no
+# legitimate reason to report more than a few hundred concurrent slots or a
+# queue that deep; these exist to stop a self-reported number from being a
+# routing-hijack primitive (see routing.selector), not to model real hardware
+# limits precisely. Not exposed via settings (no config surface owned here) —
+# a follow-up could make these operator-tunable.
+MAX_AVAILABLE_CONCURRENT_REQUESTS = 1024
+MAX_QUEUE_DEPTH = 100_000
+
 
 def health_from_registration_health(health) -> str:
     """Map a contracts ``MinerHealth`` to our stored health string."""
@@ -34,6 +43,53 @@ def health_from_registration_health(health) -> str:
     if state in {"joining"}:
         return DEGRADED
     return HEALTHY
+
+
+def _clamp_int(value, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(value, maximum))
+
+
+def _sanitize_capacity(capacity: dict) -> dict:
+    """Bound/clean self-reported heartbeat ``capacity`` before it is stored.
+
+    Two things happen here, both because ``routing.selector.MinerSelector``
+    ranks candidates directly off this dict, so an unsanitized value is a
+    routing-hijack primitive (a miner can otherwise self-report e.g.
+    ``available_concurrent_requests: 999999`` / ``queue_depth: -999`` and
+    capture all traffic for a model; combined with the C1 ownership hole this
+    becomes traffic hijacking against a specific victim miner):
+
+    * ``available_concurrent_requests`` / ``queue_depth`` are clamped to
+      ``[0, MAX_*]`` — a negative queue depth or an absurd concurrency number
+      is simply invalid, not "very good capacity".
+    * ``reputation`` is DROPPED unconditionally. Reputation is a
+      platform-observed signal now (see ``routing.selector``, sourced from
+      ``stats_recorder``-authored ``MinerRequestStat`` rows) — it must never
+      be settable by the miner itself, so heartbeat cannot smuggle it in
+      however cleanly a value is presented.
+
+    Any other keys are passed through unchanged (``extra="allow"`` on the
+    wire model; we don't know every field a future miner version might add,
+    and only the fields the selector actually reads need bounding).
+    """
+    clean = dict(capacity or {})
+    clean.pop("reputation", None)
+    if "available_concurrent_requests" in clean:
+        clean["available_concurrent_requests"] = _clamp_int(
+            clean["available_concurrent_requests"],
+            default=0,
+            minimum=0,
+            maximum=MAX_AVAILABLE_CONCURRENT_REQUESTS,
+        )
+    if "queue_depth" in clean:
+        clean["queue_depth"] = _clamp_int(
+            clean["queue_depth"], default=0, minimum=0, maximum=MAX_QUEUE_DEPTH
+        )
+    return clean
 
 
 class MinerRegistryService:
@@ -101,6 +157,18 @@ class MinerRegistryService:
                 miner.attestation_verified_at = None
                 miner.attestation_expiry = None
                 await self._revoke_active_tokens(miner.id)
+            elif miner.attestation_status == "revoked":
+                # A miner deregistered for staleness (maintenance.deregister_stale)
+                # must be able to come back: it is presenting a FRESH, signature-
+                # verified registration for the same endpoint, which is proof of
+                # liveness. Without this it stayed "revoked" forever -- the
+                # provisioner loop never selects revoked miners, and nothing else
+                # clears the flag, so a miner that merely went quiet could never
+                # rejoin. Re-attestation still has to succeed before it serves.
+                miner.attestation_status = "pending"
+                miner.attestation_verified_at = None
+                miner.attestation_expiry = None
+                await self._revoke_active_tokens(miner.id)
             self.session.add(miner)
         await self.session.flush()
         await self.replace_models(miner, reg.hosted_models)
@@ -136,7 +204,7 @@ class MinerRegistryService:
         miner.last_seen = utcnow()
         miner.health = health
         if capacity:
-            miner.capacity = capacity
+            miner.capacity = _sanitize_capacity(capacity)
         self.session.add(miner)
         await self.session.flush()
         return miner

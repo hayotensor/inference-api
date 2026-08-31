@@ -7,8 +7,11 @@ from app.auth.dependencies import current_active_user
 from app.core.rate_limit import limiter
 from app.db.models.user import User
 from app.db.session import get_async_session
+from app.core.errors import not_found
 from app.usage.schemas import (
     UsageAllowanceRead,
+    UsageByModelDetailResponse,
+    UsageByModelResponse,
     UsageHistoryResponse,
     UsagePeriodRead,
     UsageRecalculateRequest,
@@ -40,6 +43,33 @@ async def usage_history(
 ) -> UsageHistoryResponse:
     events = await UsageService(session).usage_history(user, limit=limit)
     return UsageHistoryResponse(data=events)
+
+
+@router.get("/by-model", response_model=UsageByModelResponse)
+@limiter.limit("60/minute")
+async def usage_by_model(
+    request: Request,
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user),
+) -> UsageByModelResponse:
+    rows = await UsageService(session).usage_by_model(user)
+    return UsageByModelResponse(data=rows)
+
+
+@router.get("/by-model/{model}", response_model=UsageByModelDetailResponse)
+@limiter.limit("60/minute")
+async def usage_by_model_detail(
+    request: Request,
+    model: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user),
+) -> UsageByModelDetailResponse:
+    result = await UsageService(session).usage_by_model_detail(user, model, limit=limit)
+    if result is None:
+        raise not_found("No usage found for this model")
+    summary, events = result
+    return UsageByModelDetailResponse(summary=summary, events=events)
 
 
 @router.get("/allowance", response_model=UsageAllowanceRead)

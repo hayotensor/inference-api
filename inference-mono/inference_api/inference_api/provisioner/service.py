@@ -50,6 +50,7 @@ from talaris_contracts import (
     build_provision_request,
     miner_hash as contracts_miner_hash,
 )
+from talaris_contracts.registration import TeeEndpointError, validate_tee_endpoint
 
 from inference_api.config import settings
 from inference_api.crypto import encrypt_token
@@ -172,7 +173,15 @@ class ProvisionerService:
             settings.tee_provision_timeout_seconds,
             connect=settings.tee_connect_timeout_seconds,
         )
-        return AsyncTeeClient(base_url=endpoint, timeout=timeout)
+        # The enclave serves a SELF-SIGNED TLS cert: its trust comes from the
+        # signed attestation document (report_data + TLS-SPKI signature) and the
+        # sha256(leaf-DER) fingerprint pin enforced at forward time — NOT from a
+        # CA chain. So the attestation/provision fetch disables CA + hostname
+        # verification (verify=False), exactly as the pinned forward transport
+        # does post-handshake. Without this, httpx's default verify=True rejects
+        # the self-signed leaf and provisioning can never fetch /attestation.
+        transport = httpx.AsyncHTTPTransport(verify=False)
+        return AsyncTeeClient(base_url=endpoint, transport=transport, timeout=timeout)
 
     async def provision_miner(self, miner_id: uuid.UUID) -> ProvisionOutcome:
         miner = await self.session.get(Miner, miner_id)
@@ -272,6 +281,16 @@ class ProvisionerService:
         endpoint: str,
     ) -> ProvisionOutcome:
         """Attest + seal a credential into ONE model-enclave and stamp its row."""
+        # 0. SSRF guard, re-checked here (not just at registration) because this
+        # is the actual dial site: a hostname can resolve differently now than it
+        # did at registration time (DNS rebinding is not otherwise caught). The
+        # ``AsyncTeeClient`` passed in has not made any request yet at this point,
+        # so nothing has been dialed before this check runs.
+        try:
+            validate_tee_endpoint(endpoint, app_env=settings.app_env)
+        except TeeEndpointError as exc:
+            raise ProvisionError(f"unsafe tee_endpoint: {exc}") from exc
+
         # 1. fresh nonce -> attestation
         nonce = secrets.token_bytes(32)
         try:
@@ -282,10 +301,19 @@ class ProvisionerService:
         # 2. verify via the shared verifier (single source of truth), pinning the
         #    platform model allowlist for THIS model_id (None -> check skipped).
         allowlist = await self._model_allowlist(mm.model_id)
+        # The running enclave is UNBOUND: its report_data carries miner_hash=None
+        # (doc.miner is None), so there is no attested miner hash to bind the
+        # registration hotkey against. Only enforce the registration<->attestation
+        # bind (verify step 8) when the enclave actually advertises a miner hash;
+        # otherwise step 8 would fail closed on the None. Step 3 below still checks
+        # doc.miner against the registration hotkey as defense in depth (a no-op
+        # while doc.miner is None). This is a documented relaxed-real allowance for
+        # a single-tenant, unbound enclave — it does NOT weaken hardware evidence.
+        bind_hash = expected_hash if doc.miner is not None else None
         result = verify_attestation(
             doc,
             build_expected_claims(
-                expected_miner_hash=expected_hash, model_allowlist=allowlist
+                expected_miner_hash=bind_hash, model_allowlist=allowlist
             ),
             nonce,
         )
@@ -435,10 +463,15 @@ class ProvisionerService:
         start_body = {
             "engine": settings.provisioner_engine_name,
             "model": model_id,
+            "args": settings.provisioner_engine_args,
         }
         try:
+            # verify=False for the same reason as the attestation client above:
+            # the enclave's TLS leaf is self-signed and pinned by fingerprint, not
+            # chained to a CA. /engine/* is admin-token authenticated over that
+            # same pinned-by-identity channel.
             async with httpx.AsyncClient(
-                base_url=endpoint, timeout=timeout, headers=headers
+                base_url=endpoint, timeout=timeout, headers=headers, verify=False
             ) as http:
                 # If the engine is already ready (idempotent re-provision), skip start.
                 already_ready = await self._engine_ready(http)

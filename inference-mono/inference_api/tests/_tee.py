@@ -59,6 +59,41 @@ async def bind_dev_tee(transport, base_url, signing_key: SigningKey) -> str:
     return hotkey_hex
 
 
+async def record_dev_tee_usage(
+    transport,
+    *,
+    request_id: str,
+    model: str = "demo-chat-001",
+    prompt_tokens: int = 11,
+    completion_tokens: int = 6,
+) -> None:
+    """Append a real usage row to the running dev enclave's hash-chained store.
+
+    Used by receipts tests: the enclave has no engine, so a forwarded request never
+    reaches its usage store. Writing through the producer's own ``record_request``
+    keeps the chain (and therefore the head signature that ``/usage/receipts``
+    serves) genuine — only the trigger is synthetic, not the cryptography.
+    """
+    store = transport.app.state.store
+    # Mirrors the field set ``tee_wrapper.proxy.inference`` records for a served
+    # request (``endpoint``/``engine``/``status_code`` are NOT NULL in the store).
+    await store.record_request(
+        request_id=request_id,
+        inference_key_id="platform-default",
+        engine="mock",
+        model=model,
+        endpoint="/v1/chat/completions",
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        stream=0,
+        status_code=200,
+        latency_ms=12.0,
+        ttft_ms=None,
+        finish_reason="stop",
+    )
+
+
 @contextlib.asynccontextmanager
 async def dev_tee_app(*, validator_verify_key_hex: str | None = None):
     """Yield (asgi_transport, base_url) for a running in-process dev TEE.

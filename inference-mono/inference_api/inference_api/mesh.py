@@ -16,7 +16,15 @@ class MeshInferenceResult:
 class MeshInferenceClient:
     async def run(self, payload: InferenceRequest) -> MeshInferenceResult:
         if settings.mesh_router_url is None:
-            output = f"Echo: {payload.prompt[: min(len(payload.prompt), payload.max_tokens)]}"
+            # Callers only reach this branch via the explicit
+            # ``allow_dev_echo_fallback`` opt-in (see product_routes.py); the
+            # "[UNATTESTED-DEV-ECHO]" prefix is a belt-and-suspenders textual
+            # marker in the content itself, in addition to the schema-level
+            # ``attested=False`` / ``system_fingerprint`` stamp the caller adds,
+            # so nobody can mistake this for real model output either by reading
+            # the text or by checking the response schema.
+            echoed = payload.prompt[: min(len(payload.prompt), payload.max_tokens)]
+            output = f"[UNATTESTED-DEV-ECHO] Echo: {echoed}"
             return MeshInferenceResult(output=output)
 
         try:

@@ -1,0 +1,51 @@
+# Additive overlay for the Talaris frontend + chat integration. Non-destructive:
+# it extends docker-compose.production.yml with the rebranded Open-WebUI, the
+# billing broker, and the Cloudflare Tunnel — plus the openwebui DB init.
+#
+# Usage:
+#   docker compose -f docker-compose.production.yml -f docker-compose.talaris.yml up -d
+#
+# Sibling repos are expected at ../talaris-webui and ../talaris-edge.
+
+services:
+  postgres:
+    # Create the openwebui database on a fresh volume (see the init script).
+    volumes:
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+
+  openwebui:
+    build:
+      context: ${OPENWEBUI_CONTEXT:-../talaris-webui}
+      dockerfile: ${OPENWEBUI_DOCKERFILE:-Dockerfile.basepath}
+      args:
+        PUBLIC_BASE_PATH: /chat
+    env_file: ${OPENWEBUI_ENV_FILE:-../talaris-webui/.env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      broker:
+        condition: service_started
+    restart: unless-stopped
+
+  broker:
+    build:
+      context: ${BROKER_CONTEXT:-../talaris-edge/broker}
+    env_file: ${BROKER_ENV_FILE:-../talaris-edge/broker/.env}
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      inference_api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: ["tunnel", "--config", "/etc/cloudflared/config.yml", "run"]
+    volumes:
+      - ${CLOUDFLARED_CONFIG_DIR:-../talaris-edge/cloudflared}:/etc/cloudflared:ro
+    depends_on:
+      - ui
+      - openwebui
+    restart: unless-stopped

@@ -7,7 +7,11 @@ Responsibilities (each pass):
     one maintenance interval of expiry are flagged ``stale`` so the provisioner
     loop re-attests / rotates their token;
   * deregistration: miners not seen for ``dereg_after_seconds`` (and not
-    currently attested-and-serving) are marked ``revoked``.
+    currently attested-and-serving) are marked ``revoked``;
+  * enclave receipt reconciliation (``tee_receipts_pull_enabled``): pull each
+    attested enclave's signed usage chain and corroborate our own attempt records;
+  * epoch finalization (``miner_stats_enabled``): freeze + sign the per-epoch miner
+    statistics validators score from.
 
 Guarded by ``provisioner_enabled`` at the call site in main.py's lifespan so the
 test suite opts in.
@@ -209,6 +213,42 @@ async def refresh_subnet_stake_allowances(session: AsyncSession) -> int:
     return refreshed
 
 
+async def collect_tee_receipts(session: AsyncSession) -> int:
+    """Pull + reconcile every attested enclave's signed usage-receipt chain.
+
+    Returns the number of attempt rows newly corroborated. Runs before
+    ``finalize_miner_epoch_stats`` in the pass so an epoch is verified as far as
+    possible before it is frozen — a finalized epoch can never be re-aggregated.
+    """
+    from inference_api.miners.receipts import TeeReceiptsCollector
+
+    summary = await TeeReceiptsCollector(session).collect_all()
+    return summary.rows_verified
+
+
+async def finalize_miner_epoch_stats(session: AsyncSession) -> int:
+    """Finalize every closed-and-settled epoch that has no snapshot yet.
+
+    Returns how many epochs were finalized this pass. Needs the current chain epoch;
+    without it nothing is finalized (publishing against a guessed epoch would put
+    the wrong requests in a permanently immutable artifact).
+    """
+    from inference_api.stats_recorder import current_epoch
+    from inference_api.stats_service import MinerEpochStatsService
+
+    epoch = current_epoch()
+    if epoch is None:
+        logger.info("miner_stats.finalize_skipped_no_epoch")
+        return 0
+
+    finalized = await MinerEpochStatsService(session).finalize_due(
+        current_epoch=epoch,
+        settle_lag_epochs=settings.miner_stats_settle_lag_epochs,
+        max_per_pass=settings.miner_stats_max_finalize_per_pass,
+    )
+    return len(finalized)
+
+
 async def run_maintenance_pass() -> dict[str, int]:
     async with async_session_maker() as session:
         stats = {
@@ -218,6 +258,30 @@ async def run_maintenance_pass() -> dict[str, int]:
             "deregistered": await deregister_stale(session),
         }
         await session.commit()
+
+    # Receipts + epoch finalization each get their own session so a failure in one
+    # cannot roll back the other (or the miner maintenance above). Order matters:
+    # verify first, then freeze.
+    if settings.tee_receipts_pull_enabled:
+        async with async_session_maker() as session:
+            try:
+                stats["receipts_verified"] = await collect_tee_receipts(session)
+                await session.commit()
+            except Exception:  # noqa: BLE001
+                logger.exception("receipts.pass_error")
+                await session.rollback()
+                stats["receipts_verified"] = 0
+
+    if settings.miner_stats_enabled:
+        async with async_session_maker() as session:
+            try:
+                stats["epochs_finalized"] = await finalize_miner_epoch_stats(session)
+                await session.commit()
+            except Exception:  # noqa: BLE001
+                logger.exception("miner_stats.finalize_pass_error")
+                await session.rollback()
+                stats["epochs_finalized"] = 0
+
     # Stake-quota refresh runs in its own session so an indexer/DB hiccup can't
     # roll back the miner-maintenance above (and vice versa).
     if settings.subnet_stake_quota_enabled:

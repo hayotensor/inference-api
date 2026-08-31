@@ -9,12 +9,19 @@ Streaming is passed through unchanged while the SSE ``usage`` chunk is
 accumulated so the caller can settle from real counts even if the client
 disconnects mid-stream. On a ``401`` the token is re-read once and retried; on a
 pin mismatch the miner is marked ``stale``.
+
+Every attempt — successful or not — is TIMED and given a stable ``outcome`` code.
+This is the platform's only first-hand measurement of how a miner actually
+performed, and it is what the per-epoch miner statistics (and therefore on-chain
+scoring) are built from, so a failure must carry the same detail as a success
+rather than being collapsed into a bare exception.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
@@ -33,13 +40,61 @@ from inference_api.security import utcnow
 
 logger = logging.getLogger(__name__)
 
+# Stable per-attempt outcome codes. These are persisted on every
+# ``miner_request_stats`` row and aggregated into the signed epoch snapshot, so
+# treat them as a wire format: add new codes, never repurpose an existing one.
+OUTCOME_SUCCESS = "success"
+OUTCOME_FORWARD_ERROR = "forward_error"
+OUTCOME_HTTP_ERROR = "http_error"
+OUTCOME_TIMEOUT = "timeout"
+OUTCOME_PIN_MISMATCH = "pin_mismatch"
+OUTCOME_NO_TOKEN = "no_token"
+
+
+def _elapsed_ms(started: float) -> int:
+    """Whole milliseconds since a ``time.perf_counter()`` mark (never negative)."""
+    return max(0, int((time.perf_counter() - started) * 1000))
+
+
+def _transport_outcome(exc: httpx.HTTPError) -> str:
+    """Distinguish a timeout from any other transport failure.
+
+    A timeout means the miner accepted the connection and then failed to answer in
+    time, which is a different quality signal from a refused/broken connection.
+    """
+    return OUTCOME_TIMEOUT if isinstance(exc, httpx.TimeoutException) else OUTCOME_FORWARD_ERROR
+
 
 class ForwardError(RuntimeError):
-    """A forward attempt failed (transport, auth, pin, or upstream error)."""
+    """A forward attempt failed (transport, auth, pin, or upstream error).
+
+    Carries the measurement the caller needs to record the failed attempt:
+    ``outcome`` (one of the ``OUTCOME_*`` codes), how long it took, and the
+    upstream status if there was one. Subclasses override the class-level
+    ``outcome`` default.
+    """
+
+    outcome = OUTCOME_FORWARD_ERROR
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        outcome: str | None = None,
+        latency_ms: int | None = None,
+        http_status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        if outcome is not None:
+            self.outcome = outcome
+        self.latency_ms = latency_ms
+        self.http_status = http_status
 
 
 class NoActiveTokenError(ForwardError):
     """The selected miner has no active provisioned token to forward with."""
+
+    outcome = OUTCOME_NO_TOKEN
 
 
 @dataclass
@@ -65,16 +120,27 @@ class ForwardResult:
     body: dict | None
     usage: Usage
     streamed: bool = False
+    # Wall time the platform waited on this miner, including a 401 token re-read.
+    latency_ms: int = 0
 
 
 @dataclass
 class StreamForward:
-    """A live streaming forward; iterate ``aiter()`` then read ``usage``."""
+    """A live streaming forward; iterate ``aiter()`` then read ``usage``.
+
+    ``latency_ms`` starts as the time to obtain response headers and is extended to
+    the full stream duration once the stream closes; ``ttft_ms`` is the time to the
+    first non-empty SSE payload — the number that actually reflects perceived
+    responsiveness, and the reason it is measured here rather than inferred later.
+    """
 
     candidate: MinerCandidate
     response: httpx.Response
     client: httpx.AsyncClient
     usage: Usage = field(default_factory=Usage)
+    latency_ms: int = 0
+    ttft_ms: int | None = None
+    _started: float = field(default_factory=time.perf_counter)
     _settled: bool = False
 
     async def aiter(self) -> AsyncIterator[bytes]:
@@ -94,6 +160,8 @@ class StreamForward:
             payload = line[len(b"data:"):].strip()
             if not payload or payload == b"[DONE]":
                 continue
+            if self.ttft_ms is None:
+                self.ttft_ms = _elapsed_ms(self._started)
             try:
                 obj = json.loads(payload)
             except (ValueError, UnicodeDecodeError):
@@ -106,6 +174,9 @@ class StreamForward:
         if self._settled:
             return
         self._settled = True
+        # Extend the header-only latency to the full stream duration. Done before
+        # closing so it is populated even if teardown raises.
+        self.latency_ms = _elapsed_ms(self._started)
         try:
             await self.response.aclose()
         finally:
@@ -146,8 +217,30 @@ class TEEForwarder:
             transport=self._transport,
         )
 
-    async def forward(self, candidate: MinerCandidate, payload: dict) -> ForwardResult:
-        """Non-streaming forward. Retries once on 401 after re-reading the token."""
+    def _headers(self, bearer: str, request_id: str | None) -> dict[str, str]:
+        """Auth + request-id headers for an enclave call.
+
+        The enclave stamps ``X-Request-Id`` onto the usage row it records, so this
+        header is what later lets the platform match its own attempt record against
+        the enclave's signed receipt. Callers pass the id they persisted rather than
+        relying on the ambient context, so the two sides agree by construction.
+        """
+        rid = request_id or request_id_ctx.get()
+        return {
+            "Authorization": f"Bearer {bearer}",
+            **({"X-Request-Id": rid} if rid else {}),
+        }
+
+    async def forward(
+        self, candidate: MinerCandidate, payload: dict, *, request_id: str | None = None
+    ) -> ForwardResult:
+        """Non-streaming forward. Retries once on 401 after re-reading the token.
+
+        The timer spans the whole call (including a token re-read) because that is
+        what the caller actually waited on. Every exit path — success or any
+        failure — reports a measured ``latency_ms``.
+        """
+        started = time.perf_counter()
         for attempt in (1, 2):
             token_row, bearer = await self._active_token(candidate.miner_id, candidate.model_id)
             client = self._client(candidate, bearer)
@@ -155,16 +248,21 @@ class TEEForwarder:
                 resp = await client.post(
                     "/v1/chat/completions",
                     json={**payload, "stream": False},
-                    headers={
-                        "Authorization": f"Bearer {bearer}",
-                        **({"X-Request-Id": rid} if (rid := request_id_ctx.get()) else {}),
-                    },
+                    headers=self._headers(bearer, request_id),
                 )
             except CertFingerprintMismatch as exc:
                 await self._mark_stale(candidate.miner_id)
-                raise ForwardError(f"TLS pin mismatch: {exc}") from exc
+                raise ForwardError(
+                    f"TLS pin mismatch: {exc}",
+                    outcome=OUTCOME_PIN_MISMATCH,
+                    latency_ms=_elapsed_ms(started),
+                ) from exc
             except httpx.HTTPError as exc:
-                raise ForwardError(f"forward transport error: {exc}") from exc
+                raise ForwardError(
+                    f"forward transport error: {exc}",
+                    outcome=_transport_outcome(exc),
+                    latency_ms=_elapsed_ms(started),
+                ) from exc
             finally:
                 await client.aclose()
 
@@ -173,7 +271,10 @@ class TEEForwarder:
                 continue
             if resp.status_code >= 400:
                 raise ForwardError(
-                    f"enclave returned {resp.status_code} for {candidate.hotkey[:12]}..."
+                    f"enclave returned {resp.status_code} for {candidate.hotkey[:12]}...",
+                    outcome=OUTCOME_HTTP_ERROR,
+                    latency_ms=_elapsed_ms(started),
+                    http_status=resp.status_code,
                 )
             body = resp.json()
             usage = Usage.from_dict(body.get("usage") if isinstance(body, dict) else None)
@@ -182,11 +283,20 @@ class TEEForwarder:
                 status_code=resp.status_code,
                 body=body,
                 usage=usage,
+                latency_ms=_elapsed_ms(started),
             )
-        raise ForwardError("forward failed after token re-read")
+        raise ForwardError(
+            "forward failed after token re-read",
+            outcome=OUTCOME_HTTP_ERROR,
+            latency_ms=_elapsed_ms(started),
+            http_status=401,
+        )
 
-    async def forward_stream(self, candidate: MinerCandidate, payload: dict) -> StreamForward:
+    async def forward_stream(
+        self, candidate: MinerCandidate, payload: dict, *, request_id: str | None = None
+    ) -> StreamForward:
         """Open a streaming forward. Caller iterates and then reads ``.usage``."""
+        started = time.perf_counter()
         token_row, bearer = await self._active_token(candidate.miner_id, candidate.model_id)
         client = self._client(candidate, bearer)
         stream_payload = {
@@ -198,22 +308,38 @@ class TEEForwarder:
             "POST",
             "/v1/chat/completions",
             json=stream_payload,
-            headers={
-                "Authorization": f"Bearer {bearer}",
-                **({"X-Request-Id": rid} if (rid := request_id_ctx.get()) else {}),
-            },
+            headers=self._headers(bearer, request_id),
         )
         try:
             response = await client.send(request, stream=True)
         except CertFingerprintMismatch as exc:
             await client.aclose()
             await self._mark_stale(candidate.miner_id)
-            raise ForwardError(f"TLS pin mismatch: {exc}") from exc
+            raise ForwardError(
+                f"TLS pin mismatch: {exc}",
+                outcome=OUTCOME_PIN_MISMATCH,
+                latency_ms=_elapsed_ms(started),
+            ) from exc
         except httpx.HTTPError as exc:
             await client.aclose()
-            raise ForwardError(f"forward transport error: {exc}") from exc
+            raise ForwardError(
+                f"forward transport error: {exc}",
+                outcome=_transport_outcome(exc),
+                latency_ms=_elapsed_ms(started),
+            ) from exc
         if response.status_code >= 400:
             await response.aclose()
             await client.aclose()
-            raise ForwardError(f"enclave returned {response.status_code}")
-        return StreamForward(candidate=candidate, response=response, client=client)
+            raise ForwardError(
+                f"enclave returned {response.status_code}",
+                outcome=OUTCOME_HTTP_ERROR,
+                latency_ms=_elapsed_ms(started),
+                http_status=response.status_code,
+            )
+        return StreamForward(
+            candidate=candidate,
+            response=response,
+            client=client,
+            latency_ms=_elapsed_ms(started),
+            _started=started,
+        )

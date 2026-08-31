@@ -26,6 +26,15 @@ class UserBillingAccount(Base):
     stripe_customer_id: Mapped[str | None] = mapped_column(
         String(255), unique=True, index=True
     )
+    # Set when a Checkout Session is created and cleared once it resolves (completed
+    # or expired). Lets create_checkout_session refuse a second session for this
+    # account while one is still open, closing the window where a double-click or a
+    # retry — before the webhook has synced the first payment — would let Stripe bill
+    # the customer twice.
+    pending_checkout_session_id: Mapped[str | None] = mapped_column(String(255))
+    pending_checkout_session_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )

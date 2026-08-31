@@ -1,6 +1,8 @@
 from typing import Literal
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi.responses import RedirectResponse
 from fastapi_users.exceptions import (
     InvalidPasswordException,
     InvalidResetPasswordToken,
@@ -29,10 +31,24 @@ from app.auth.schemas import (
     RefreshRequest,
     RequestVerifyEmail,
     ResetPasswordRequest,
+    SSOTokenResponse,
     TokenResponse,
     VerifyEmailRequest,
 )
-from app.auth.service import AuthService, UserManager, get_user_manager, optional_active_user
+from app.auth.service import (
+    AuthService,
+    UserManager,
+    current_active_user,
+    get_user_manager,
+    optional_active_user,
+)
+from app.auth.wallet import (
+    WalletAuthResponse,
+    WalletAuthService,
+    WalletNonceLoginRequest,
+    WalletNonceLoginResponse,
+    WalletVerifyLoginRequest,
+)
 from app.auth.token_revocation import extract_bearer_token
 from app.core.config import settings
 from app.core.errors import bad_request, unauthorized
@@ -60,6 +76,13 @@ async def get_phone_service(
     return PhoneService(session, auth_service)
 
 
+async def get_wallet_auth_service(
+    session: AsyncSession = Depends(get_async_session),
+    auth_service: AuthService = Depends(get_auth_service),
+) -> WalletAuthService:
+    return WalletAuthService(session, auth_service)
+
+
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
 async def register(
@@ -77,6 +100,11 @@ async def register(
 
     await write_audit_log(session, "auth.register", user_id=user.id, request=request)
     await session.commit()
+    if settings.auto_verify_new_users:
+        # Dev/demo shortcut: treat the address as proven and send no email, so a
+        # fresh signup can immediately mint an API key. Off by default; see the
+        # security note on the setting.
+        return await user_manager.user_db.update(user, {"is_verified": True})
     try:
         await user_manager.request_verify(user, request)
     except UserAlreadyVerified:
@@ -229,13 +257,27 @@ async def _oauth_callback(
     provider: Literal["google", "apple"],
     session: AsyncSession,
     auth_service: AuthService,
-) -> TokenResponse:
+) -> RedirectResponse:
     client = get_oauth_client(provider)
     token = await client.authorize_access_token(request)
     profile = await extract_oauth_profile(provider, request, token)
     result = await OAuthService(session, auth_service).login_or_create(profile, token, request)
     await session.commit()
-    return result
+    # Google/Apple redirect the browser here directly (this route is the
+    # registered OAuth redirect_uri), so the response has to be something a
+    # browser can land on -- not the raw TokenResponse JSON. Hand off to the
+    # frontend's own callback page (app/auth/callback/[provider]/page.tsx),
+    # which already knows how to pick these query params up and store the
+    # session. quote (not the default quote_plus) so decodeURIComponent on
+    # the JS side doesn't misread a literal "+" as an encoded space.
+    params = {
+        "access_token": result.access_token,
+        "refresh_token": result.refresh_token,
+        "expires_in": str(result.expires_in),
+        "user": result.user.model_dump_json(),
+    }
+    redirect_url = f"{settings.app_url}/auth/callback/{provider}?{urlencode(params, quote_via=quote)}"
+    return RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/google/login")
@@ -244,13 +286,13 @@ async def google_login(request: Request):
     return await _oauth_login(request, "google")
 
 
-@router.get("/google/callback", response_model=TokenResponse, name="google_callback")
+@router.get("/google/callback", name="google_callback")
 @limiter.limit("20/minute")
 async def google_callback(
     request: Request,
     session: AsyncSession = Depends(get_async_session),
     auth_service: AuthService = Depends(get_auth_service),
-) -> TokenResponse:
+) -> RedirectResponse:
     return await _oauth_callback(request, "google", session, auth_service)
 
 
@@ -260,13 +302,13 @@ async def apple_login(request: Request):
     return await _oauth_login(request, "apple")
 
 
-@router.get("/apple/callback", response_model=TokenResponse, name="apple_callback")
+@router.get("/apple/callback", name="apple_callback")
 @limiter.limit("20/minute")
 async def apple_callback(
     request: Request,
     session: AsyncSession = Depends(get_async_session),
     auth_service: AuthService = Depends(get_auth_service),
-) -> TokenResponse:
+) -> RedirectResponse:
     return await _oauth_callback(request, "apple", session, auth_service)
 
 
@@ -337,3 +379,40 @@ async def phone_unlink(
     updated = await phone_service.unlink_phone(user, request)
     await session.commit()
     return updated
+
+
+@router.post("/wallet/nonce", response_model=WalletNonceLoginResponse)
+@limiter.limit("10/minute")
+async def wallet_login_nonce(
+    request: Request,
+    payload: WalletNonceLoginRequest,
+    session: AsyncSession = Depends(get_async_session),
+    wallet_service: WalletAuthService = Depends(get_wallet_auth_service),
+) -> WalletNonceLoginResponse:
+    result = await wallet_service.create_login_nonce(payload.address)
+    await session.commit()
+    return result
+
+
+@router.post("/wallet/verify", response_model=WalletAuthResponse)
+@limiter.limit("10/minute")
+async def wallet_login_verify(
+    request: Request,
+    payload: WalletVerifyLoginRequest,
+    session: AsyncSession = Depends(get_async_session),
+    wallet_service: WalletAuthService = Depends(get_wallet_auth_service),
+) -> WalletAuthResponse:
+    result = await wallet_service.login_or_create(payload, request)
+    await session.commit()
+    return result
+
+
+@router.post("/sso/cookie", response_model=SSOTokenResponse)
+@limiter.limit("30/minute")
+async def issue_sso_cookie_token(
+    request: Request,
+    auth_service: AuthService = Depends(get_auth_service),
+    user: User = Depends(current_active_user),
+) -> SSOTokenResponse:
+    token, ttl = auth_service.issue_sso_token(user)
+    return SSOTokenResponse(sso_token=token, expires_in=ttl)

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "talaris-contracts"
+version = "0.1.0"
+description = "Shared wire-format / SDK package for the Talaris system: Pydantic v2 mirrors of the TEE container's wire formats, crypto helpers, and a thin TEE HTTP client."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "Talaris" }]
+dependencies = [
+    "pydantic>=2",
+    "pynacl",
+    "httpx",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+talaris_contracts = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
