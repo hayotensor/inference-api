@@ -152,20 +152,39 @@
     @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
   }
 
+  /* These four are written as plain CSS rather than `@apply`, deliberately.
+     `@apply tracking-label` couples this stylesheet to a custom key in
+     tailwind.config.ts, and a build that fails to pick the config up (a
+     long-running `next dev` holding a stale copy, say) does not silently drop
+     the class -- it fails the whole sheet with "Failed to compile". These
+     declarations depend only on the CSS variables above, which are defined in
+     this same file. */
+
   /* UPPERCASE + 0.14em tracking, Inter Medium. Labels, eyebrows, section
      numbers, nav groups, table headers -- every piece of system metadata. */
   .eyebrow {
-    @apply text-[11px] font-medium uppercase leading-4 tracking-label text-muted-foreground;
+    font-size: 11px;
+    line-height: 1rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: hsl(var(--muted-foreground));
   }
 
   /* Monospace for stats, IDs, counts, versions, and network metadata. */
   .metadata {
-    @apply font-mono text-sm tracking-[0.02em] text-muted-foreground;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, "Roboto Mono",
+      monospace;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    letter-spacing: 0.02em;
+    color: hsl(var(--muted-foreground));
   }
 
   /* Thin rules partition; they never decorate. */
   .rule {
-    @apply border-0 border-t border-border;
+    border: 0;
+    border-top: 1px solid hsl(var(--border));
   }
 
   /* Display numerals -- Sora, tabular so columns of figures stay aligned. */
