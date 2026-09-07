@@ -14,6 +14,7 @@ import {
 
 import { PublicNav } from "@/components/public-nav";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { apiKeysApi, billingApi, usageApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -104,26 +105,30 @@ export default function HomePage() {
     <div className="min-h-screen bg-background">
       <PublicNav />
       <main>
-        <section className="border-b bg-muted/30">
+        <section className="border-b border-border bg-background">
           <div className="page-shell grid min-h-[calc(100vh-4rem)] items-center gap-10 py-12 lg:grid-cols-[0.92fr_1.08fr]">
             <div className="max-w-2xl">
-              <div className="mb-5 inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1 text-sm text-muted-foreground">
-                <ShieldCheck className="h-4 w-4 text-emerald-600" />
+              <div className="mb-6 inline-flex items-center gap-2 rounded-sm border border-border px-3 py-1.5 text-[11px] font-medium uppercase tracking-label text-muted-foreground">
+                <ShieldCheck className="h-3.5 w-3.5 text-foreground" strokeWidth={1.5} />
                 API-owned auth, billing, usage, and wallet verification
               </div>
-              <h1 className="text-4xl font-semibold tracking-normal sm:text-5xl">
-                Inference API
+              {/* Display headline: Sora Light at the kit's display size, short
+                  period-terminated sentences, one headline per surface. */}
+              <h1 className="font-display text-[44px] font-light leading-[52px] tracking-display sm:text-[56px] sm:leading-[64px]">
+                Open infrastructure.
+                <br />
+                Verifiable inference.
               </h1>
-              <p className="mt-5 text-lg leading-8 text-muted-foreground">
-                A production dashboard for developers to manage access, subscriptions,
-                token usage, wallet verification, and demo inference without duplicating
-                backend business logic.
+              <p className="mt-6 max-w-xl text-lg leading-8 text-muted-foreground">
+                Manage access, subscriptions, token usage, wallet verification, and demo
+                inference from one console. Auth, billing, and metering stay owned by the
+                API — the dashboard never duplicates that logic.
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                 <Button size="lg" asChild>
                   <Link href="/signup">
                     Create account
-                    <ArrowRight />
+                    <ArrowRight strokeWidth={1.5} />
                   </Link>
                 </Button>
                 <Button size="lg" variant="outline" asChild>
@@ -132,39 +137,35 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="rounded-lg border bg-background shadow-sm">
-              <div className="border-b p-4">
+            <div className="rounded-2xl border border-border bg-card">
+              <div className="border-b border-border p-5">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium">Developer console</p>
-                    <p className="text-xs text-muted-foreground">
-                      {isAuthenticated ? "Your account, live" : "Example account"}
+                    <p className="eyebrow">Developer console</p>
+                    <p className="metadata mt-1 text-xs">
+                      {isAuthenticated ? "your account · live" : "example account"}
                     </p>
                   </div>
-                  <div
-                    className={
-                      isAuthenticated
-                        ? "rounded-md bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-800"
-                        : "rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground"
-                    }
-                  >
+                  {/* Filled Eggshell is the affirmative terminal state; the
+                      placeholder stays a quiet outlined tag. See ui/badge.tsx. */}
+                  <Badge variant={isAuthenticated ? "success" : "secondary"}>
                     {isAuthenticated ? "Synced" : "Sample data"}
-                  </div>
+                  </Badge>
                 </div>
               </div>
-              <div className="grid gap-4 p-4 sm:grid-cols-2">
+              {/* gap-px over the border color draws the grid as hairlines rather
+                  than as a stack of nested boxes. */}
+              <div className="grid gap-px bg-border sm:grid-cols-2">
                 {stats.map(([label, value, detail]) => (
-                  <Card key={label} className="shadow-none">
-                    <CardContent className="p-4">
-                      <p className="text-xs text-muted-foreground">{label}</p>
-                      <p className="mt-2 text-2xl font-semibold tracking-normal">{value}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
-                    </CardContent>
-                  </Card>
+                  <div key={label} className="bg-card p-5">
+                    <p className="eyebrow">{label}</p>
+                    <p className="numeral mt-3 text-2xl font-medium">{value}</p>
+                    <p className="metadata mt-1 text-xs">{detail}</p>
+                  </div>
                 ))}
               </div>
-              <div className="border-t p-4">
-                <div className="space-y-3">
+              <div className="border-t border-border p-5">
+                <div>
                   {[
                     "POST /auth/login",
                     "POST /billing/stripe/checkout-session",
@@ -173,10 +174,10 @@ export default function HomePage() {
                   ].map((endpoint) => (
                     <div
                       key={endpoint}
-                      className="flex items-center justify-between rounded-md bg-muted px-3 py-2 font-mono text-xs"
+                      className="flex items-center justify-between border-t border-border px-1 py-2.5 font-mono text-xs text-muted-foreground first:border-t-0"
                     >
                       <span>{endpoint}</span>
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      <CheckCircle2 className="h-3.5 w-3.5 text-foreground" strokeWidth={1.5} />
                     </div>
                   ))}
                 </div>
@@ -185,17 +186,23 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="page-shell py-14">
+        <section className="page-shell py-24">
+          <p className="eyebrow mb-6">Capabilities</p>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            {capabilities.map((item) => {
+            {capabilities.map((item, i) => {
               const Icon = item.icon;
               return (
-                <Card key={item.title}>
-                  <CardContent className="p-5">
-                    <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
-                      <Icon className="h-5 w-5" />
-                    </div>
-                    <h2 className="font-semibold">{item.title}</h2>
+                <Card key={item.title} interactive className="flex flex-col">
+                  <div className="flex items-center justify-between border-b border-border px-5 py-3">
+                    <Icon className="h-4 w-4 text-muted-foreground" strokeWidth={1.5} />
+                    <span className="metadata text-xs">
+                      {String(i + 1).padStart(2, "0")} / {String(capabilities.length).padStart(2, "0")}
+                    </span>
+                  </div>
+                  <CardContent className="flex-1 p-5 pt-5">
+                    <h2 className="font-display text-base font-medium tracking-display">
+                      {item.title}
+                    </h2>
                     <p className="mt-2 text-sm leading-6 text-muted-foreground">
                       {item.description}
                     </p>

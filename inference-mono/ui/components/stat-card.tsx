@@ -1,49 +1,81 @@
 import type { LucideIcon } from "lucide-react";
 
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
+/**
+ * Talaris stat tile.
+ *
+ * The kit gives cards an eyebrow + index row over a thin rule, then the
+ * content. There are no tone colors here by design -- the old blue/green/amber
+ * icon chips are gone, because the system has no chromatic accents and no
+ * status hues. The icon is a Warm Gray line glyph; the figure is the only
+ * thing at full Off-White, which is what makes it read first.
+ *
+ * `emphasis` promotes a single tile in a row (the one figure that matters most
+ * on the page) by inverting it to the Eggshell fill. Use it sparingly -- one
+ * per row at most, or the emphasis stops meaning anything.
+ */
 export function StatCard({
   label,
   value,
   icon: Icon,
-  tone = "blue",
-  detail
+  detail,
+  emphasis = false,
+  className
 }: {
   label: string;
   value: string;
   icon: LucideIcon;
-  tone?: "blue" | "green" | "amber" | "neutral";
   detail?: string;
+  emphasis?: boolean;
+  className?: string;
 }) {
-  const tones = {
-    blue: "bg-blue-50 text-blue-700",
-    green: "bg-emerald-50 text-emerald-700",
-    amber: "bg-amber-50 text-amber-700",
-    neutral: "bg-slate-100 text-slate-700"
-  };
-
   return (
-    <Card>
-      <CardContent className="flex items-center gap-4 p-5">
-        <div
+    <Card
+      className={cn(
+        "flex flex-col",
+        emphasis && "border-transparent bg-eggshell text-background",
+        className
+      )}
+    >
+      <div
+        className={cn(
+          "flex items-center justify-between gap-3 border-b px-5 py-3",
+          emphasis ? "border-background/15" : "border-border"
+        )}
+      >
+        <span
           className={cn(
-            "flex h-10 w-10 shrink-0 items-center justify-center rounded-md",
-            tones[tone]
+            "eyebrow truncate",
+            emphasis && "text-background/70"
           )}
         >
-          <Icon className="h-5 w-5" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm text-muted-foreground">{label}</p>
-          <p className="mt-1 truncate text-2xl font-semibold tracking-normal">
-            {value}
+          {label}
+        </span>
+        <Icon
+          className={cn(
+            "h-4 w-4 shrink-0",
+            emphasis ? "text-background/70" : "text-muted-foreground"
+          )}
+          strokeWidth={1.5}
+        />
+      </div>
+      <div className="flex flex-1 flex-col justify-end px-5 pb-5 pt-4">
+        <p className="numeral truncate text-[32px] font-medium leading-10">
+          {value}
+        </p>
+        {detail ? (
+          <p
+            className={cn(
+              "metadata mt-1.5 truncate text-xs",
+              emphasis && "text-background/70"
+            )}
+          >
+            {detail}
           </p>
-          {detail ? (
-            <p className="mt-1 truncate text-xs text-muted-foreground">{detail}</p>
-          ) : null}
-        </div>
-      </CardContent>
+        ) : null}
+      </div>
     </Card>
   );
 }

@@ -11,7 +11,9 @@ const Checkbox = React.forwardRef<
   <CheckboxPrimitive.Root
     ref={ref}
     className={cn(
-      "peer h-4 w-4 shrink-0 rounded-sm border border-primary ring-offset-background focus-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
+      // Unchecked reads as an empty Graphite cut-out; checked fills with
+      // Eggshell and cuts the tick out in Void Black.
+      "peer h-4 w-4 shrink-0 rounded-sm border border-input bg-transparent transition-colors duration-fast ease-standard hover:border-border-strong focus-ring disabled:cursor-not-allowed disabled:opacity-40 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
       className
     )}
     {...props}

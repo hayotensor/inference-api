@@ -1,0 +1,73 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <defs>
+    <symbol id="compute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="miter" stroke-linecap="square">
+      <rect x="4" y="4" width="16" height="16"></rect>
+      <line x1="4" y1="9" x2="20" y2="9"></line>
+      <line x1="4" y1="15" x2="20" y2="15"></line>
+      <line x1="9" y1="4" x2="9" y2="20"></line>
+      <line x1="15" y1="4" x2="15" y2="20"></line>
+    </symbol>
+    <symbol id="training" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25">
+      <circle cx="12" cy="6" r="2"></circle>
+      <circle cx="5" cy="18" r="2"></circle>
+      <circle cx="19" cy="18" r="2"></circle>
+      <line x1="12" y1="8" x2="6" y2="16"></line>
+      <line x1="12" y1="8" x2="18" y2="16"></line>
+      <line x1="7" y1="18" x2="17" y2="18"></line>
+    </symbol>
+    <symbol id="agents" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25">
+      <polygon points="12,3 21,8 21,16 12,21 3,16 3,8"></polygon>
+      <line x1="12" y1="3" x2="12" y2="12"></line>
+      <line x1="3" y1="8" x2="12" y2="12"></line>
+      <line x1="21" y1="8" x2="12" y2="12"></line>
+      <line x1="12" y1="12" x2="12" y2="21"></line>
+    </symbol>
+    <symbol id="marketplace" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25">
+      <path d="M3 7 L5 3 L19 3 L21 7"></path>
+      <line x1="3" y1="7" x2="21" y2="7"></line>
+      <path d="M5 7 V21 H19 V7"></path>
+      <path d="M3 7 a3 3 0 0 0 6 0 a3 3 0 0 0 6 0 a3 3 0 0 0 6 0"></path>
+    </symbol>
+    <symbol id="network" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25">
+      <circle cx="12" cy="12" r="3"></circle>
+      <circle cx="4" cy="5" r="1.5"></circle>
+      <circle cx="20" cy="5" r="1.5"></circle>
+      <circle cx="4" cy="19" r="1.5"></circle>
+      <circle cx="20" cy="19" r="1.5"></circle>
+      <line x1="5" y1="6" x2="10" y2="11"></line>
+      <line x1="19" y1="6" x2="14" y2="11"></line>
+      <line x1="5" y1="18" x2="10" y2="13"></line>
+      <line x1="19" y1="18" x2="14" y2="13"></line>
+    </symbol>
+    <symbol id="security" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25">
+      <path d="M12 3 L20 6 V12 C20 16.5 16.5 20 12 21 C7.5 20 4 16.5 4 12 V6 Z"></path>
+      <path d="M9 12 L11.5 14.5 L15.5 10"></path>
+    </symbol>
+    <symbol id="economics" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25">
+      <circle cx="12" cy="12" r="9"></circle>
+      <line x1="12" y1="6" x2="12" y2="18"></line>
+      <path d="M15 9 H10.5 a2 2 0 0 0 0 4 H13.5 a2 2 0 0 1 0 4 H9"></path>
+    </symbol>
+    <symbol id="docs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25">
+      <path d="M6 3 H15 L19 7 V21 H6 Z"></path>
+      <path d="M15 3 V7 H19"></path>
+      <line x1="9" y1="12" x2="16" y2="12"></line>
+      <line x1="9" y1="16" x2="16" y2="16"></line>
+    </symbol>
+    <symbol id="arrow-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square">
+      <line x1="4" y1="12" x2="20" y2="12"></line>
+      <polyline points="14,6 20,12 14,18"></polyline>
+    </symbol>
+    <symbol id="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square">
+      <polyline points="4,12 10,18 20,6"></polyline>
+    </symbol>
+    <symbol id="hex" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25">
+      <polygon points="12,2 21,7 21,17 12,22 3,17 3,7"></polygon>
+    </symbol>
+    <symbol id="shard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25">
+      <polygon points="9,2 17,5 17,22 9,22"></polygon>
+      <line x1="13" y1="3" x2="13" y2="22"></line>
+    </symbol>
+  </defs>
+</svg>

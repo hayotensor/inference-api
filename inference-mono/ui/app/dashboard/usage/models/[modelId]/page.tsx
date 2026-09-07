@@ -1,10 +1,12 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, BarChart3 } from "lucide-react";
 
+import { AdminPagination } from "@/components/admin-common";
 import { DashboardPageHeader } from "@/components/dashboard-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 import { StatCard } from "@/components/stat-card";
@@ -21,13 +23,17 @@ import {
 import { usageApi } from "@/lib/api";
 import { formatDateTime, formatNumber } from "@/lib/format";
 
+const EVENTS_PAGE_SIZE = 25;
+
 export default function UsageByModelDetailPage() {
   const params = useParams<{ modelId: string }>();
   const model = decodeURIComponent(params.modelId);
+  const [offset, setOffset] = React.useState(0);
 
   const detailQuery = useQuery({
-    queryKey: ["usage-by-model", model],
-    queryFn: ({ signal }) => usageApi.byModelDetail(model, 100, { signal })
+    queryKey: ["usage-by-model", model, { limit: EVENTS_PAGE_SIZE, offset }],
+    queryFn: ({ signal }) =>
+      usageApi.byModelDetail(model, { limit: EVENTS_PAGE_SIZE, offset }, { signal })
   });
 
   const summary = detailQuery.data?.summary;
@@ -40,9 +46,9 @@ export default function UsageByModelDetailPage() {
         description="Token usage totals and recent requests for this model."
         action={
           <Button asChild variant="outline">
-            <Link href="/dashboard/usage/models">
+            <Link href="/dashboard/usage">
               <ArrowLeft />
-              Back to models
+              Back to usage
             </Link>
           </Button>
         }
@@ -59,26 +65,22 @@ export default function UsageByModelDetailPage() {
             label="Requests"
             value={formatNumber(summary.request_count)}
             icon={BarChart3}
-            tone="blue"
           />
           <StatCard
             label="Prompt tokens"
             value={formatNumber(summary.prompt_tokens)}
             icon={BarChart3}
-            tone="amber"
           />
           <StatCard
             label="Completion tokens"
             value={formatNumber(summary.completion_tokens)}
             icon={BarChart3}
-            tone="amber"
           />
           <StatCard
             label="Charged tokens"
             value={formatNumber(summary.charged_tokens)}
             detail={summary.last_used_at ? `Last used ${formatDateTime(summary.last_used_at)}` : undefined}
             icon={BarChart3}
-            tone="green"
           />
         </div>
       ) : null}
@@ -96,30 +98,38 @@ export default function UsageByModelDetailPage() {
             />
           ) : null}
           {events.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Request</TableHead>
-                  <TableHead>Prompt tokens</TableHead>
-                  <TableHead>Completion tokens</TableHead>
-                  <TableHead>Charged</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {events.map((event) => (
-                  <TableRow key={event.id}>
-                    <TableCell className="font-mono text-xs">{event.request_id}</TableCell>
-                    <TableCell>{formatNumber(event.prompt_tokens)}</TableCell>
-                    <TableCell>{formatNumber(event.completion_tokens)}</TableCell>
-                    <TableCell>{formatNumber(event.charged_tokens)}</TableCell>
-                    <TableCell>{event.status}</TableCell>
-                    <TableCell>{formatDateTime(event.created_at)}</TableCell>
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Request</TableHead>
+                    <TableHead>Prompt tokens</TableHead>
+                    <TableHead>Completion tokens</TableHead>
+                    <TableHead>Charged</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Created</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {events.map((event) => (
+                    <TableRow key={event.id}>
+                      <TableCell className="font-mono text-xs">{event.request_id}</TableCell>
+                      <TableCell>{formatNumber(event.prompt_tokens)}</TableCell>
+                      <TableCell>{formatNumber(event.completion_tokens)}</TableCell>
+                      <TableCell>{formatNumber(event.charged_tokens)}</TableCell>
+                      <TableCell>{event.status}</TableCell>
+                      <TableCell>{formatDateTime(event.created_at)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <AdminPagination
+                total={detailQuery.data?.total_events ?? events.length}
+                limit={detailQuery.data?.limit ?? EVENTS_PAGE_SIZE}
+                offset={detailQuery.data?.offset ?? offset}
+                onOffsetChange={setOffset}
+              />
+            </>
           ) : null}
         </CardContent>
       </Card>

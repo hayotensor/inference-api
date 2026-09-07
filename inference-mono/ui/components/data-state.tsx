@@ -25,9 +25,9 @@ export function ErrorState({
   onRetry?: () => void;
 }) {
   return (
-    <div className="flex min-h-40 flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-6 text-center">
-      <AlertCircle className="h-5 w-5 text-destructive" />
-      <p className="max-w-md text-sm text-muted-foreground">
+    <div className="flex min-h-40 flex-col items-center justify-center gap-3 rounded-lg border border-border-strong bg-card p-8 text-center">
+      <AlertCircle className="h-5 w-5 text-foreground" strokeWidth={1.5} />
+      <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
         {apiErrorMessage(error)}
       </p>
       {onRetry ? (
@@ -49,12 +49,12 @@ export function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-dashed p-8 text-center">
-      <h3 className="text-sm font-semibold">{title}</h3>
-      <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+    <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
+      <h3 className="font-display text-base font-medium tracking-display">{title}</h3>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
         {description}
       </p>
-      {action ? <div className="mt-4">{action}</div> : null}
+      {action ? <div className="mt-6">{action}</div> : null}
     </div>
   );
 }

@@ -2,11 +2,17 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
+/**
+ * Talaris table. Rows are partitioned by 1px Graphite top-borders -- the kit's
+ * "thin rules partition, never decorate" rule -- and headers are UPPERCASE
+ * Inter Medium at 0.14em tracking, same as every other label in the system.
+ * Hover shifts the row to Charcoal; nothing lifts.
+ */
 const Table = React.forwardRef<
   HTMLTableElement,
   React.HTMLAttributes<HTMLTableElement>
 >(({ className, ...props }, ref) => (
-  <div className="w-full overflow-auto">
+  <div className="w-full overflow-x-auto">
     <table
       ref={ref}
       className={cn("w-full caption-bottom text-sm", className)}
@@ -43,7 +49,7 @@ const TableRow = React.forwardRef<
   <tr
     ref={ref}
     className={cn(
-      "border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted",
+      "border-b border-border transition-colors duration-fast ease-standard hover:bg-elevated data-[state=selected]:bg-elevated",
       className
     )}
     {...props}
@@ -58,7 +64,7 @@ const TableHead = React.forwardRef<
   <th
     ref={ref}
     className={cn(
-      "h-11 px-3 text-left align-middle text-xs font-medium uppercase tracking-normal text-muted-foreground",
+      "h-11 px-3 text-left align-middle text-[11px] font-medium uppercase leading-4 tracking-label text-muted-foreground",
       className
     )}
     {...props}
@@ -70,7 +76,7 @@ const TableCell = React.forwardRef<
   HTMLTableCellElement,
   React.TdHTMLAttributes<HTMLTableCellElement>
 >(({ className, ...props }, ref) => (
-  <td ref={ref} className={cn("p-3 align-middle", className)} {...props} />
+  <td ref={ref} className={cn("px-3 py-3.5 align-middle", className)} {...props} />
 ));
 TableCell.displayName = "TableCell";
 

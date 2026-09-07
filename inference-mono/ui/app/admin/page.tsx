@@ -92,25 +92,21 @@ export default function AdminOverviewPage() {
             label="Disabled users"
             value={formatNumber(overviewQuery.data.users_disabled)}
             icon={Shield}
-            tone="amber"
           />
           <StatCard
             label="Active API keys"
             value={formatNumber(overviewQuery.data.active_api_keys)}
             icon={KeyRound}
-            tone="green"
           />
           <StatCard
             label="Visible plans"
             value={formatNumber(overviewQuery.data.visible_plans)}
             icon={ListChecks}
-            tone="neutral"
           />
           <StatCard
             label="Active subscriptions"
             value={formatNumber(overviewQuery.data.active_subscriptions)}
             icon={CreditCard}
-            tone="green"
           />
           <StatCard
             label="Used tokens"

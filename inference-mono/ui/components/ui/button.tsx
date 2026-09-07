@@ -4,24 +4,37 @@ import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
 
+/**
+ * Talaris buttons.
+ *
+ * Per the kit: 2px radius, no shadow, no scale or lift on press. State is
+ * carried entirely by fill swap and border color --
+ *   primary    Eggshell -> Off-White fill
+ *   secondary  transparent -> Charcoal fill, Graphite -> Eggshell border
+ *   ghost      transparent -> Charcoal fill
+ *   link       Off-White -> Eggshell text
+ * `destructive` has no red available to it, so it inverts completely on hover
+ * (transparent + Stone Gray border -> solid Off-White on Void Black), which is
+ * the loudest the monochrome ramp gets.
+ */
 const buttonVariants = cva(
-  "inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium transition-colors focus-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:h-4 [&_svg]:w-4",
+  "inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium transition-colors duration-base ease-standard focus-ring disabled:pointer-events-none disabled:opacity-40 [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        default: "bg-primary text-primary-foreground hover:bg-primary-hover",
         destructive:
-          "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+          "border border-border-strong bg-transparent text-foreground hover:border-foreground hover:bg-foreground hover:text-background",
         outline:
-          "border border-input bg-background hover:bg-muted hover:text-foreground",
+          "border border-input bg-transparent text-foreground hover:border-eggshell hover:bg-elevated",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        ghost: "hover:bg-muted hover:text-foreground",
-        link: "h-auto px-0 py-0 text-primary underline-offset-4 hover:underline"
+          "border border-transparent bg-secondary text-secondary-foreground hover:bg-graphite",
+        ghost: "text-muted-foreground hover:bg-elevated hover:text-foreground",
+        link: "h-auto px-0 py-0 text-foreground underline-offset-4 hover:text-eggshell hover:underline"
       },
       size: {
         default: "h-10 px-4 py-2",
-        sm: "h-9 px-3",
+        sm: "h-9 px-3 text-[13px]",
         lg: "h-11 px-5",
         icon: "h-10 w-10 px-0"
       }

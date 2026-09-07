@@ -256,6 +256,19 @@ export function apiErrorMessage(error: unknown) {
 }
 
 /**
+ * True for the "verify an email/phone/wallet before doing X" 403s the API
+ * returns (e.g. creating an API key on an unverified account). Used to surface
+ * a link to account verification instead of a generic permission-denied toast.
+ */
+export function isVerificationRequiredError(error: unknown) {
+  return (
+    error instanceof ApiError &&
+    error.status === 403 &&
+    /verify/i.test(error.message)
+  );
+}
+
+/**
  * Set/refresh the httpOnly SSO cookie (via the same-origin route handler) so the
  * edge Worker can identify this user when routing to /chat. Best-effort.
  */
@@ -322,6 +335,13 @@ export const authApi = {
   resetPassword(payload: { token: string; password: string }) {
     return apiRequest<MessageResponse>("/auth/reset-password", {
       method: "POST",
+      body: payload
+    });
+  },
+  changePassword(payload: { current_password: string; new_password: string }) {
+    return apiRequest<MessageResponse>("/auth/change-password", {
+      method: "POST",
+      auth: true,
       body: payload
     });
   },
@@ -510,15 +530,21 @@ export const usageApi = {
       signal: options.signal
     });
   },
-  byModel(options: ApiCallOptions = {}) {
-    return apiRequest<UsageByModelResponse>("/usage/by-model", {
-      auth: true,
-      signal: options.signal
-    });
+  byModel(params: { limit?: number; offset?: number } = {}, options: ApiCallOptions = {}) {
+    const { limit = 50, offset = 0 } = params;
+    return apiRequest<UsageByModelResponse>(
+      `/usage/by-model?limit=${limit}&offset=${offset}`,
+      { auth: true, signal: options.signal }
+    );
   },
-  byModelDetail(model: string, limit = 100, options: ApiCallOptions = {}) {
+  byModelDetail(
+    model: string,
+    params: { limit?: number; offset?: number } = {},
+    options: ApiCallOptions = {}
+  ) {
+    const { limit = 100, offset = 0 } = params;
     return apiRequest<UsageByModelDetailResponse>(
-      `/usage/by-model/${encodeURIComponent(model)}?limit=${limit}`,
+      `/usage/by-model/${encodeURIComponent(model)}?limit=${limit}&offset=${offset}`,
       { auth: true, signal: options.signal }
     );
   },

@@ -187,8 +187,8 @@ export function AdminConfirmDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-md bg-amber-100 text-amber-700">
-            <AlertTriangle className="h-5 w-5" />
+          <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-sm border border-border-strong text-foreground">
+            <AlertTriangle className="h-5 w-5" strokeWidth={1.5} />
           </div>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>

@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Clipboard, KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Clipboard, KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -33,7 +34,7 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table";
-import { apiErrorMessage, apiKeysApi } from "@/lib/api";
+import { apiErrorMessage, apiKeysApi, isVerificationRequiredError } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import type { ApiKeyCreateResponse, ApiKeyRead, ApiKeyScope } from "@/lib/types";
 
@@ -89,6 +90,8 @@ export default function ApiKeysPage() {
     },
     onError: (error) => toast.error(apiErrorMessage(error))
   });
+  const createError = createMutation.isError ? createMutation.error : null;
+  const createNeedsVerification = isVerificationRequiredError(createError);
 
   const revokeMutation = useMutation({
     mutationFn: apiKeysApi.revoke,
@@ -108,7 +111,12 @@ export default function ApiKeysPage() {
         title="API keys"
         description="Create scoped credentials and revoke them through the backend API."
         action={
-          <Button onClick={() => setShowCreate((value) => !value)}>
+          <Button
+            onClick={() => {
+              createMutation.reset();
+              setShowCreate((value) => !value);
+            }}
+          >
             <Plus />
             Create key
           </Button>
@@ -181,8 +189,29 @@ export default function ApiKeysPage() {
             </div>
           </div>
 
+          {createError ? (
+            <div className="mt-4 flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="space-y-1">
+                <p>{apiErrorMessage(createError)}</p>
+                {createNeedsVerification ? (
+                  <Link href="/dashboard/settings" className="font-medium underline underline-offset-2">
+                    Go to Settings to verify your account
+                  </Link>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           <div className="mt-5 flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                createMutation.reset();
+                setShowCreate(false);
+              }}
+            >
               Cancel
             </Button>
             <Button type="submit" disabled={createMutation.isPending}>

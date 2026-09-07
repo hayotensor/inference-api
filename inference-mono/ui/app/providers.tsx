@@ -30,7 +30,25 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>{children}</AuthProvider>
-      <Toaster richColors closeButton position="top-right" />
+      {/* `richColors` is deliberately off: it paints toasts green/red/amber,
+          and the Talaris system has no status hues. Toasts are Charcoal panels
+          with a Graphite hairline, same as every other elevated surface. */}
+      <Toaster
+        closeButton
+        position="top-right"
+        theme="dark"
+        toastOptions={{
+          classNames: {
+            toast:
+              "!rounded-lg !border !border-border !bg-elevated !text-foreground !font-sans !shadow-none",
+            title: "!text-sm !font-medium",
+            description: "!text-sm !text-muted-foreground",
+            actionButton: "!rounded-sm !bg-primary !text-primary-foreground",
+            cancelButton: "!rounded-sm !bg-transparent !text-muted-foreground",
+            closeButton: "!rounded-sm !border-border !bg-elevated !text-muted-foreground"
+          }
+        }}
+      />
     </QueryClientProvider>
   );
 }

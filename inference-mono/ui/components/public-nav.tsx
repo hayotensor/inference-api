@@ -11,11 +11,14 @@ export function PublicNav() {
   const { isAuthenticated, logout } = useAuth();
 
   return (
-    <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-border bg-void/85 backdrop-blur-[8px]">
       <div className="page-shell flex h-16 items-center justify-between">
         <AppLogo />
-        <nav className="hidden items-center gap-6 text-sm text-muted-foreground sm:flex">
-          <Link href="/pricing" className="hover:text-foreground">
+        <nav className="hidden items-center gap-8 sm:flex">
+          <Link
+            href="/pricing"
+            className="focus-ring text-[11px] font-medium uppercase tracking-label text-muted-foreground transition-colors duration-fast ease-standard hover:text-foreground"
+          >
             Pricing
           </Link>
         </nav>
@@ -24,12 +27,12 @@ export function PublicNav() {
             <>
               <Button variant="outline" size="sm" asChild>
                 <Link href="/dashboard">
-                  <LayoutDashboard />
+                  <LayoutDashboard strokeWidth={1.5} />
                   Dashboard
                 </Link>
               </Button>
               <Button variant="ghost" size="icon" onClick={() => void logout()}>
-                <LogOut />
+                <LogOut strokeWidth={1.5} />
                 <span className="sr-only">Log out</span>
               </Button>
             </>
@@ -41,7 +44,7 @@ export function PublicNav() {
               <Button size="sm" asChild>
                 <Link href="/signup">
                   Sign up
-                  <ArrowRight />
+                  <ArrowRight strokeWidth={1.5} />
                 </Link>
               </Button>
             </>

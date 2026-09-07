@@ -21,9 +21,9 @@ export function AuthFormShell({
   footer?: React.ReactNode;
 }) {
   return (
-    <main className="min-h-screen bg-muted/35">
+    <main className="min-h-screen bg-background">
       <div className="page-shell flex min-h-screen flex-col items-center justify-center py-10">
-        <AppLogo className="mb-8" />
+        <AppLogo className="mb-10" />
         <Card className="w-full max-w-md">
           <CardHeader>
             <CardTitle>{title}</CardTitle>
@@ -32,11 +32,14 @@ export function AuthFormShell({
           <CardContent>{children}</CardContent>
         </Card>
         {footer ? (
-          <div className="mt-6 text-center text-sm text-muted-foreground">
+          <div className="mt-8 text-center text-sm text-muted-foreground">
             {footer}
           </div>
         ) : (
-          <Link href="/" className="mt-6 text-sm text-muted-foreground hover:text-foreground">
+          <Link
+            href="/"
+            className="focus-ring mt-8 text-[11px] font-medium uppercase tracking-label text-muted-foreground transition-colors duration-fast ease-standard hover:text-foreground"
+          >
             Back to home
           </Link>
         )}

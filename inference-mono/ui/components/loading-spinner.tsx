@@ -19,7 +19,8 @@ export function LoadingSpinner({
     >
       <Loader2
         aria-hidden="true"
-        className={cn("h-5 w-5 animate-spin text-primary", iconClassName)}
+        className={cn("h-5 w-5 animate-spin text-muted-foreground", iconClassName)}
+        strokeWidth={1.5}
       />
     </div>
   );

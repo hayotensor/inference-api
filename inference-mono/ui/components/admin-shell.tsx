@@ -21,7 +21,6 @@ import { ErrorState, LoadingState } from "@/components/data-state";
 import { PageLoadingState } from "@/components/loading-spinner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { adminApi, ApiError } from "@/lib/api";
 import { AuthGate, useAuth } from "@/lib/auth";
 import { navPathMatches, usePendingNavPath } from "@/lib/pending-nav";
@@ -57,16 +56,19 @@ function hasAny(admin: AdminMe, permissions?: AdminPermission[]) {
 
 function AdminAccessDenied() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/30 p-6">
-      <div className="w-full max-w-md rounded-lg border bg-background p-6 text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md bg-destructive/10 text-destructive">
-          <Shield className="h-6 w-6" />
+    <div className="flex min-h-screen items-center justify-center bg-background p-6">
+      <div className="w-full max-w-md rounded-lg border border-border bg-card p-8 text-center">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-sm border border-border-strong text-foreground">
+          <Shield className="h-6 w-6" strokeWidth={1.5} />
         </div>
-        <h1 className="mt-4 text-xl font-semibold tracking-normal">Admin access required</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
+        <p className="eyebrow mt-5">Access</p>
+        <h1 className="mt-2 font-display text-xl font-medium tracking-display">
+          Admin access required
+        </h1>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
           Your account is authenticated, but it does not have an active admin role.
         </p>
-        <Button asChild className="mt-5">
+        <Button asChild className="mt-6">
           <Link href="/dashboard">Return to dashboard</Link>
         </Button>
       </div>
@@ -89,7 +91,7 @@ function AdminGate({ children }: { children: React.ReactNode }) {
       return <AdminAccessDenied />;
     }
     return (
-      <div className="flex min-h-screen items-center justify-center bg-muted/30 p-6">
+      <div className="flex min-h-screen items-center justify-center bg-background p-6">
         <ErrorState error={adminQuery.error} onRetry={() => void adminQuery.refetch()} />
       </div>
     );
@@ -133,14 +135,14 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
   const visibleNavItems = navItems.filter((item) => hasAny(admin, item.permissions));
 
   return (
-    <div className="min-h-screen bg-muted/30">
-      <aside className="pointer-events-auto fixed inset-y-0 left-0 z-30 hidden w-72 border-r bg-background lg:block">
+    <div className="min-h-screen bg-background">
+      <aside className="pointer-events-auto fixed inset-y-0 left-0 z-30 hidden w-72 border-r border-border bg-onyx lg:block">
         <div className="flex h-full flex-col">
-          <div className="flex h-16 items-center justify-between px-5">
+          <div className="flex h-16 items-center justify-between border-b border-border px-5">
             <AppLogo />
             <Badge variant="outline">Admin</Badge>
           </div>
-          <nav className="flex-1 space-y-1 px-3 py-4">
+          <nav className="flex-1 space-y-0.5 py-4">
             {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const active = navPathMatches(activePath, item.href, "/admin");
@@ -150,33 +152,39 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
                   href={item.href}
                   onClick={(event) => markPendingHref(item.href, event)}
                   className={cn(
-                    "pointer-events-auto flex h-10 items-center gap-3 rounded-md px-3 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground",
-                    active && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground"
+                    "pointer-events-auto flex h-10 items-center gap-3 border-l-2 border-transparent px-4 text-[11px] font-medium uppercase tracking-label transition-colors duration-fast ease-standard",
+                    active
+                      ? "border-l-foreground bg-elevated text-foreground"
+                      : "text-muted-foreground hover:bg-onyx hover:text-foreground"
                   )}
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className="h-4 w-4 shrink-0" strokeWidth={1.5} />
                   {item.label}
                 </Link>
               );
             })}
           </nav>
-          <div className="p-4">
-            <Separator className="mb-4" />
+          <div className="border-t border-border p-4">
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium">{admin.email}</p>
-              <p className="truncate text-xs text-muted-foreground">
+              <p className="truncate text-sm font-medium text-foreground">{admin.email}</p>
+              <p className="metadata mt-0.5 truncate text-xs">
                 {admin.roles.map((role) => role.name).join(", ")}
               </p>
             </div>
             <div className="mt-3 grid gap-2">
-              <Button asChild variant="outline" className="justify-start">
+              <Button asChild variant="outline" size="sm" className="justify-start">
                 <Link href="/dashboard">
-                  <BarChart3 />
+                  <BarChart3 strokeWidth={1.5} />
                   User dashboard
                 </Link>
               </Button>
-              <Button variant="outline" className="justify-start" onClick={() => void logout()}>
-                <LogOut />
+              <Button
+                variant="outline"
+                size="sm"
+                className="justify-start"
+                onClick={() => void logout()}
+              >
+                <LogOut strokeWidth={1.5} />
                 Log out
               </Button>
             </div>
@@ -185,7 +193,7 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="lg:pl-72">
-        <header className="pointer-events-auto sticky top-0 z-20 border-b bg-background/95 backdrop-blur lg:hidden">
+        <header className="pointer-events-auto sticky top-0 z-20 border-b border-border bg-void/85 backdrop-blur-[8px] lg:hidden">
           <div className="flex h-16 items-center justify-between px-4">
             <div className="flex items-center gap-2">
               <AppLogo />
@@ -196,7 +204,7 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
               Log out
             </Button>
           </div>
-          <nav className="pointer-events-auto flex gap-2 overflow-x-auto border-t px-4 py-2">
+          <nav className="pointer-events-auto flex gap-1 overflow-x-auto border-t border-border px-4 py-2">
             {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const active = navPathMatches(activePath, item.href, "/admin");
@@ -206,18 +214,20 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
                   href={item.href}
                   onClick={(event) => markPendingHref(item.href, event)}
                   className={cn(
-                    "pointer-events-auto flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-sm text-muted-foreground",
-                    active && "bg-primary text-primary-foreground"
+                    "pointer-events-auto flex h-9 shrink-0 items-center gap-2 rounded-sm border px-3 text-[11px] font-medium uppercase tracking-label transition-colors duration-fast ease-standard",
+                    active
+                      ? "border-border bg-elevated text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className="h-4 w-4 shrink-0" strokeWidth={1.5} />
                   {item.label}
                 </Link>
               );
             })}
           </nav>
         </header>
-        <main className="page-shell py-6 lg:py-8">
+        <main className="page-shell py-8 lg:py-12">
           {isPending ? <PageLoadingState /> : children}
         </main>
       </div>

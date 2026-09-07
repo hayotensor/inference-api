@@ -80,28 +80,24 @@ export default function DashboardPage() {
           value={formatNumber(usage?.remaining_tokens)}
           detail={usage ? `Through ${formatDate(usage.period_end)}` : undefined}
           icon={BarChart3}
-          tone="green"
         />
         <StatCard
           label="Used tokens"
           value={formatNumber(usage?.used_tokens)}
           detail={`${percent}% of allowance`}
           icon={BarChart3}
-          tone="blue"
         />
         <StatCard
           label="Active keys"
           value={formatNumber(activeKeys)}
           detail={`${keysQuery.data?.length ?? 0} total keys`}
           icon={KeyRound}
-          tone="amber"
         />
         <StatCard
           label="Wallet"
           value={walletQuery.data ? "Verified" : "Not linked"}
           detail={shortenAddress(walletQuery.data?.address)}
           icon={WalletCards}
-          tone="neutral"
         />
       </div>
 

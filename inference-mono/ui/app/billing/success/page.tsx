@@ -97,7 +97,7 @@ function BillingSuccessContent() {
       <main className="page-shell flex min-h-[calc(100vh-4rem)] items-center justify-center py-10">
         <Card className="w-full max-w-xl">
           <CardContent className="p-6 text-center">
-            <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-600" />
+            <CheckCircle2 className="mx-auto h-10 w-10 text-foreground" strokeWidth={1.25} />
             <h1 className="mt-4 text-2xl font-semibold tracking-normal">Billing updated</h1>
             <p className="mt-2 text-sm text-muted-foreground">
               Stripe redirected back successfully. Subscription state is refetched from the API.
@@ -111,7 +111,7 @@ function BillingSuccessContent() {
             ) : null}
 
             {gaveUpConfirming ? (
-              <div className="mt-6 rounded-lg border border-amber-300/50 bg-amber-50 p-4 text-left text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+              <div className="mt-6 rounded-lg border border-border-strong bg-elevated p-4 text-left text-sm leading-relaxed text-foreground">
                 Stripe hasn&apos;t confirmed this payment with us yet. This can happen if the
                 webhook is delayed — try refreshing in a moment, or check the billing dashboard.
                 <Button

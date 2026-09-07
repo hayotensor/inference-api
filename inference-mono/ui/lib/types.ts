@@ -20,6 +20,7 @@ export interface User {
   phone_verified_at: string | null;
   created_at: string;
   oauth_providers: string[];
+  has_verifiable_email: boolean;
 }
 
 export interface TokenResponse {
@@ -164,11 +165,17 @@ export interface UsageByModel {
 
 export interface UsageByModelResponse {
   data: UsageByModel[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface UsageByModelDetailResponse {
   summary: UsageByModel;
   events: UsageEvent[];
+  total_events: number;
+  limit: number;
+  offset: number;
 }
 
 export interface EvmNonceResponse {
@@ -423,4 +430,32 @@ export interface AdminStatsBilling {
   active_subscriptions: number;
   trialing_subscriptions: number;
   canceled_subscriptions: number;
+}
+
+// One approved model artifact from the platform-signed allowlist. Mirrors
+// talaris_contracts.allowlist.AllowlistEntry on the wire.
+export interface AttestedModelEntry {
+  model_id: string;
+  model_version?: string | null;
+  model_hash: string;
+  args_hash?: string | null;
+  gpu_hash?: string | null;
+  label?: string | null;
+}
+
+// HYP-37: the frontend's own independent re-verification result of the
+// inference-api's signed model allowlist. See
+// app/api/attestation-status/route.ts (producer) and
+// components/attestation-badge.tsx (consumer).
+export interface AttestationStatusResponse {
+  status: "verified" | "unverified";
+  checkedAt: string;
+  reason?: string;
+  platformPubkey?: string;
+  allowlistVersion?: number;
+  entryCount?: number;
+  // Only populated when status is "verified" -- the actual attested claims,
+  // not just a count. Absent on any unverified result so nothing unverified
+  // is ever rendered as if it were checked.
+  entries?: AttestedModelEntry[];
 }

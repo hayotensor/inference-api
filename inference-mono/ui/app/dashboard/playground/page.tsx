@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Loader2, Play, RefreshCw } from "lucide-react";
+import { AlertTriangle, Loader2, Play, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { DashboardPageHeader } from "@/components/dashboard-shell";
@@ -21,10 +22,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import { apiErrorMessage, productApi } from "@/lib/api";
+import { apiErrorMessage, isVerificationRequiredError, productApi } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { formatNumber } from "@/lib/format";
 
 export default function PlaygroundPage() {
+  const { user } = useAuth();
+  const isUnverified = Boolean(user) && !user!.is_verified && !user!.phone_verified_at;
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("demo-inference-001");
   const [prompt, setPrompt] = useState("Explain how token allowance is deducted.");
@@ -73,6 +77,17 @@ export default function PlaygroundPage() {
             <CardDescription>Uses `/v1/models`, `/v1/inference`, and `/v1/usage`.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {isUnverified ? (
+              <div className="flex items-start gap-3 rounded-sm border border-border-strong bg-elevated p-3.5 text-sm leading-relaxed text-foreground">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div className="space-y-1">
+                  <p>No API key? Creating one requires a verified email, phone, or wallet.</p>
+                  <Link href="/dashboard/settings" className="font-medium underline underline-offset-2">
+                    Verify your account in Settings
+                  </Link>
+                </div>
+              </div>
+            ) : null}
             <div className="space-y-2">
               <Label htmlFor="api-key">API key</Label>
               <Input
@@ -149,6 +164,22 @@ export default function PlaygroundPage() {
               <CardDescription>Inference output and usage returned by the API.</CardDescription>
             </CardHeader>
             <CardContent>
+              {inferenceMutation.isError ? (
+                <div className="mb-4 flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="space-y-1">
+                    <p>{apiErrorMessage(inferenceMutation.error)}</p>
+                    {isVerificationRequiredError(inferenceMutation.error) ? (
+                      <Link
+                        href="/dashboard/settings"
+                        className="font-medium underline underline-offset-2"
+                      >
+                        Go to Settings to verify your account
+                      </Link>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               {!inferenceMutation.data ? (
                 <EmptyState
                   title="No response yet"
