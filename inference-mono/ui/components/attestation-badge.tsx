@@ -11,6 +11,7 @@ import {
   DialogTitle,
   DialogTrigger
 } from "@/components/ui/dialog";
+import { formatDateTime } from "@/lib/format";
 import type { AttestationStatusResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -137,12 +138,23 @@ export function AttestationBadge() {
 
   const { label, icon: Icon, className, borderClassName } = DISPLAY[effective];
 
+  // `allowlistVersion` is not an opaque counter -- inference_api's
+  // ModelAllowlistService derives it as the unix timestamp of the newest
+  // `updated_at` across the active allowlist rows (see allowlist_service.py),
+  // so it IS the real moment the attested content was last (re)proven. That's
+  // what a user asking "when was this actually proven" wants -- distinct from
+  // `checkedAt`, which is just when this browser last polled and legitimately
+  // ticks forward on every reload/re-check even when nothing changed.
+  const provenAt =
+    effective === "verified" && result?.allowlistVersion
+      ? new Date(result.allowlistVersion * 1000)
+      : null;
+
   const summary =
     effective === "verified"
       ? `Independently verified this platform's signed model allowlist ` +
-        `(v${result?.allowlistVersion ?? "?"}, ${result?.entryCount ?? 0} model` +
-        `${result?.entryCount === 1 ? "" : "s"}) against its pinned Ed25519 key. ` +
-        `The signature checks out.`
+        `(${result?.entryCount ?? 0} model${result?.entryCount === 1 ? "" : "s"}) ` +
+        `against its pinned Ed25519 key. The signature checks out.`
       : effective === "stale"
         ? "The last successful check was over 24 hours ago. This page may have been open a long time, or the periodic re-check was paused (e.g. a backgrounded browser tab). Click \"Check now\" for a fresh result."
         : `Could not independently verify the platform's signed allowlist. ${reasonSentence(result?.reason)}`;
@@ -166,9 +178,13 @@ export function AttestationBadge() {
           >
             {label}
           </span>
-          {checkedAt ? (
+          {provenAt ? (
             <span className="ml-auto shrink-0 font-mono text-[10px] text-stone">
-              {checkedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              {provenAt.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          ) : checkedAt ? (
+            <span className="ml-auto shrink-0 font-mono text-[10px] text-stone">
+              {checkedAt.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
             </span>
           ) : null}
         </button>
@@ -192,7 +208,14 @@ export function AttestationBadge() {
             <code className="font-mono text-xs text-foreground">GET /allowlist</code>, then recomputes and
             checks the Ed25519 signature itself.
           </p>
-          {checkedAt ? <p>Last checked: {checkedAt.toLocaleString()}</p> : null}
+          {provenAt ? (
+            <p>
+              <span className="font-medium text-foreground">Proven at: </span>
+              {formatDateTime(provenAt.toISOString())} -- when this allowlist was last
+              (re)signed with its current content, not when this page happened to check it.
+            </p>
+          ) : null}
+          {checkedAt ? <p>Last checked: {formatDateTime(checkedAt.toISOString())}</p> : null}
           {result?.platformPubkey ? (
             <p className="break-all">
               Pinned platform key:{" "}
