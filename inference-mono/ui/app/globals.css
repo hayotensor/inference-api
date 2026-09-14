@@ -81,6 +81,70 @@
     color-scheme: dark;
   }
 
+  /* ---------------------------------------------------------------------
+     Light mode -- self-designed, not part of the brand kit.
+     ------------------------------------------------------------------------
+     The kit specs one ramp (Void Black -> Off-White) and calls the product
+     dark-only; there is no light surface to port. This inverts that same
+     ramp rather than introducing new hues, so it stays inside the "monochrome,
+     Eggshell is the only warm note" rule:
+
+       - Page ground and text swap ends: Off-White ground, Void Black text.
+       - The primary action fill also flips. Eggshell only has contrast as a
+         *light* fill on a *dark* page (see button.tsx); on a light page the
+         same fill would nearly vanish, so light mode's primary button is
+         Void Black -> Charcoal on hover instead -- the dark end of the ramp
+         doing the job Eggshell does in dark mode.
+       - `--muted-foreground` and `--border` get new, darker steps
+         (`--slate` / `--mist`) rather than reusing Warm Gray / Graphite at
+         their dark-mode lightness, which would be too faint on a light
+         ground. These two are the only genuinely new tokens; everything else
+         reuses the existing eight.
+     ------------------------------------------------------------------- */
+  :root.light {
+    --slate: 240 5% 33%; /* muted text on a light ground -- Warm Gray's counterpart */
+    --mist: 240 6% 88%; /* hairlines on a light ground -- Graphite's counterpart */
+    --mist-strong: 240 5% 72%;
+
+    --background: var(--off-white);
+    --foreground: var(--void-black);
+
+    --card: 0 0% 100%;
+    --card-foreground: var(--void-black);
+    --elevated: var(--eggshell);
+
+    --popover: 0 0% 100%;
+    --popover-foreground: var(--void-black);
+
+    --primary: var(--void-black);
+    --primary-foreground: var(--off-white);
+    --primary-hover: var(--charcoal);
+
+    --secondary: var(--eggshell);
+    --secondary-foreground: var(--void-black);
+
+    --muted: var(--eggshell);
+    --muted-foreground: var(--slate);
+
+    --accent: var(--eggshell);
+    --accent-foreground: var(--void-black);
+
+    --destructive: var(--void-black);
+    --destructive-foreground: var(--off-white);
+
+    --border: var(--mist);
+    --border-strong: var(--mist-strong);
+    --input: var(--mist);
+    --ring: var(--void-black);
+
+    color-scheme: light;
+  }
+
+  :root.light ::selection {
+    background: hsl(var(--graphite));
+    color: hsl(var(--off-white));
+  }
+
   * {
     @apply border-border;
   }
@@ -94,6 +158,14 @@
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-body), system-ui, sans-serif;
     font-feature-settings: "rlig" 1, "calt" 1;
+    /* HYP-47: iOS Safari/older Android WebViews bump body text size on
+       rotation unless told not to; every other engine ignores this. */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    /* Mobile Safari/Chrome paint a gray/blue flash on tap targets that no
+       other engine shows -- suppress it so tap feedback is only ever the
+       kit's own hover/active states. */
+    -webkit-tap-highlight-color: transparent;
   }
 
   /* Sora for anything display-weight, with the kit's tight display tracking.

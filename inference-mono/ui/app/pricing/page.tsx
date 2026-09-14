@@ -55,7 +55,7 @@ export default function PricingPage() {
   const annualAvailable = plans.some((plan) => planIsPurchasable(plan, "year"));
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-dvh bg-background">
       <PublicNav />
       <main className="page-shell py-12">
         <div className="mb-8 flex flex-wrap items-end justify-between gap-6">
@@ -65,8 +65,10 @@ export default function PricingPage() {
               Pricing
             </h1>
             <p className="mt-3 text-muted-foreground">
-              Every plan includes a monthly token allowance across all served models. Cancel
-              or change plans at any time from the billing dashboard.
+              Every plan includes a monthly credit allowance across all served models. Credits
+              are spent per request, and each model has its own rate -- larger models cost more
+              credits per token than smaller ones. Cancel or change plans at any time from the
+              billing dashboard.
             </p>
           </div>
           {annualAvailable ? (
@@ -123,7 +125,12 @@ function PlanCard({
   const priceCents = isFree ? 0 : planPriceCents(plan, interval);
   const purchasable = planIsPurchasable(plan, interval);
   const monthlyEquivalent = interval === "year" ? monthlyEquivalentCents(plan) : null;
-  const rate = formatRatePerMillion(plan.price_cents, plan.monthly_token_allowance, plan.currency);
+  const rate = formatRatePerMillion(
+    plan.price_cents,
+    plan.monthly_token_allowance,
+    plan.currency,
+    "credits"
+  );
 
   return (
     <Card className={plan.name === "Pro" ? "border-primary" : ""}>
@@ -133,7 +140,7 @@ function PlanCard({
           {plan.name === "Pro" ? <Badge>Popular</Badge> : null}
         </div>
         <CardDescription>
-          {formatNumber(plan.monthly_token_allowance)} tokens per month
+          {formatNumber(plan.monthly_token_allowance)} credits per month
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -158,7 +165,7 @@ function PlanCard({
         <ul className="space-y-2 text-sm text-muted-foreground">
           <li className="flex gap-2">
             <Check className="mt-0.5 h-4 w-4 shrink-0 text-foreground" strokeWidth={1.5} />
-            {formatNumber(plan.monthly_token_allowance)} tokens / month
+            {formatNumber(plan.monthly_token_allowance)} credits / month
           </li>
           <li className="flex gap-2">
             <Check className="mt-0.5 h-4 w-4 shrink-0 text-foreground" strokeWidth={1.5} />

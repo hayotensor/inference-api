@@ -9,9 +9,9 @@ import { Card, CardContent } from "@/components/ui/card";
 
 export default function BillingCancelPage() {
   return (
-    <div className="min-h-screen bg-muted/30">
+    <div className="min-h-dvh bg-muted/30">
       <PublicNav />
-      <main className="page-shell flex min-h-[calc(100vh-4rem)] items-center justify-center py-10">
+      <main className="page-shell flex min-h-[calc(100dvh-4rem)] items-center justify-center py-10">
         <Card className="w-full max-w-xl">
           <CardContent className="p-6 text-center">
             <XCircle className="mx-auto h-10 w-10 text-muted-foreground" strokeWidth={1.25} />

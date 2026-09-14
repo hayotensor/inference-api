@@ -18,6 +18,7 @@ import {
 
 import { AppLogo } from "@/components/app-logo";
 import { ErrorState, LoadingState } from "@/components/data-state";
+import { LogoutConfirmDialog } from "@/components/logout-confirm-dialog";
 import { PageLoadingState } from "@/components/loading-spinner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,7 +57,7 @@ function hasAny(admin: AdminMe, permissions?: AdminPermission[]) {
 
 function AdminAccessDenied() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-6">
+    <div className="flex min-h-dvh items-center justify-center bg-background p-6">
       <div className="w-full max-w-md rounded-lg border border-border bg-card p-8 text-center">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-sm border border-border-strong text-foreground">
           <Shield className="h-6 w-6" strokeWidth={1.5} />
@@ -91,7 +92,7 @@ function AdminGate({ children }: { children: React.ReactNode }) {
       return <AdminAccessDenied />;
     }
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-6">
+      <div className="flex min-h-dvh items-center justify-center bg-background p-6">
         <ErrorState error={adminQuery.error} onRetry={() => void adminQuery.refetch()} />
       </div>
     );
@@ -132,11 +133,12 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
   const { activePath, isPending, markPendingHref } = usePendingNavPath(pathname);
   const admin = useAdmin();
   const { logout } = useAuth();
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = React.useState(false);
   const visibleNavItems = navItems.filter((item) => hasAny(admin, item.permissions));
 
   return (
-    <div className="min-h-screen bg-background">
-      <aside className="pointer-events-auto fixed inset-y-0 left-0 z-30 hidden w-72 border-r border-border bg-onyx lg:block">
+    <div className="min-h-dvh bg-background">
+      <aside className="pointer-events-auto fixed inset-y-0 left-0 z-30 hidden w-72 border-r border-border bg-card lg:block">
         <div className="flex h-full flex-col">
           <div className="flex h-16 items-center justify-between border-b border-border px-5">
             <AppLogo />
@@ -155,7 +157,7 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
                     "pointer-events-auto flex h-10 items-center gap-3 border-l-2 border-transparent px-4 text-[11px] font-medium uppercase tracking-label transition-colors duration-fast ease-standard",
                     active
                       ? "border-l-foreground bg-elevated text-foreground"
-                      : "text-muted-foreground hover:bg-onyx hover:text-foreground"
+                      : "text-muted-foreground hover:bg-card hover:text-foreground"
                   )}
                 >
                   <Icon className="h-4 w-4 shrink-0" strokeWidth={1.5} />
@@ -182,7 +184,7 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
                 variant="outline"
                 size="sm"
                 className="justify-start"
-                onClick={() => void logout()}
+                onClick={() => setLogoutConfirmOpen(true)}
               >
                 <LogOut strokeWidth={1.5} />
                 Log out
@@ -193,13 +195,13 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="lg:pl-72">
-        <header className="pointer-events-auto sticky top-0 z-20 border-b border-border bg-void/85 backdrop-blur-[8px] lg:hidden">
+        <header className="pointer-events-auto sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur-[8px] lg:hidden">
           <div className="flex h-16 items-center justify-between px-4">
             <div className="flex items-center gap-2">
               <AppLogo />
               <Badge variant="outline">Admin</Badge>
             </div>
-            <Button variant="outline" size="sm" onClick={() => void logout()}>
+            <Button variant="outline" size="sm" onClick={() => setLogoutConfirmOpen(true)}>
               <LogOut />
               Log out
             </Button>
@@ -231,6 +233,14 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
           {isPending ? <PageLoadingState /> : children}
         </main>
       </div>
+      <LogoutConfirmDialog
+        open={logoutConfirmOpen}
+        onOpenChange={setLogoutConfirmOpen}
+        onConfirm={() => {
+          setLogoutConfirmOpen(false);
+          void logout();
+        }}
+      />
     </div>
   );
 }

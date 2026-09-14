@@ -21,8 +21,8 @@ export function AuthFormShell({
   footer?: React.ReactNode;
 }) {
   return (
-    <main className="min-h-screen bg-background">
-      <div className="page-shell flex min-h-screen flex-col items-center justify-center py-10">
+    <main className="min-h-dvh bg-background">
+      <div className="page-shell flex min-h-dvh flex-col items-center justify-center py-10">
         <AppLogo className="mb-10" />
         <Card className="w-full max-w-md">
           <CardHeader>

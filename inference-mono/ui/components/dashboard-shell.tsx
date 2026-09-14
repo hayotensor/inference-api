@@ -7,38 +7,120 @@ import { usePathname } from "next/navigation";
 import {
   BarChart3,
   CreditCard,
+  ExternalLink,
   KeyRound,
   LayoutDashboard,
   LogOut,
   MessagesSquare,
-  MessageSquareText,
-  Settings
+  Moon,
+  Settings,
+  Sun,
+  WalletCards
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { AppLogo } from "@/components/app-logo";
 import { AttestationBadge } from "@/components/attestation-badge";
+import { LogoutConfirmDialog } from "@/components/logout-confirm-dialog";
 import { PageLoadingState } from "@/components/loading-spinner";
+import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
 import { AuthGate, useAuth } from "@/lib/auth";
 import { navPathMatches, usePendingNavPath } from "@/lib/pending-nav";
+import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+
+/**
+ * Dark/light toggle. Icon-only and unlabeled by the kit's nav conventions --
+ * it sits with account chrome (log out), not with the section nav -- and
+ * shows the mode a click switches *to* (a moon while on light, a sun while on
+ * dark), which is the common convention for this control.
+ */
+function ThemeToggle({ className }: { className?: string }) {
+  const { theme, toggleTheme } = useTheme();
+  const switchingToLight = theme === "dark";
+  return (
+    <Button
+      variant="outline"
+      size="icon"
+      className={className}
+      onClick={toggleTheme}
+      aria-label={switchingToLight ? "Switch to light mode" : "Switch to dark mode"}
+      title={switchingToLight ? "Switch to light mode" : "Switch to dark mode"}
+    >
+      {switchingToLight ? (
+        <Sun strokeWidth={1.5} />
+      ) : (
+        <Moon strokeWidth={1.5} />
+      )}
+    </Button>
+  );
+}
+
+/**
+ * Launches chat in a new tab. Chat needs the httpOnly SSO cookie minted first
+ * (see `ensureSsoCookie`), which is asynchronous -- but a `window.open()` that
+ * happens *after* an `await` is no longer "in direct response to" the click,
+ * so popup blockers kill it. The fix: open the tab synchronously, in the same
+ * event-handler tick as the click (satisfying the popup blocker), pointed at
+ * a blank page, then redirect that already-open tab once the cookie call
+ * resolves. Tradeoff: this keeps `window.opener` set on the new tab (we can't
+ * pass `noopener` and still hold a reference to redirect it), so chat -- a
+ * first-party app we control -- can technically reach back into this window;
+ * that's an acceptable surface for an app we own, but would not be for a
+ * third-party destination.
+ */
+function ChatButton({
+  ensureSsoCookie,
+  className
+}: {
+  ensureSsoCookie: () => Promise<void>;
+  className?: string;
+}) {
+  const openChat = React.useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      event.preventDefault();
+      const chatWindow = window.open("about:blank", "_blank");
+      void ensureSsoCookie()
+        .catch(() => {
+          // Best-effort: still navigate, the front door will redirect if needed.
+        })
+        .then(() => {
+          if (chatWindow) chatWindow.location.href = CHAT_URL;
+        });
+    },
+    [ensureSsoCookie]
+  );
+
+  return (
+    <Button variant="outline" size="sm" className={className} asChild>
+      {/* href/target/rel are progressive enhancement (middle-click, "open link in
+          new tab", copy link) -- the primary path always goes through onClick so
+          the SSO cookie is guaranteed to be set before the tab is redirected. */}
+      <a href={CHAT_URL} target="_blank" rel="noopener noreferrer" onClick={openChat}>
+        <MessagesSquare strokeWidth={1.5} />
+        Chat
+        <ExternalLink strokeWidth={1.5} />
+      </a>
+    </Button>
+  );
+}
 
 type NavItem = { href: string; label: string; icon: LucideIcon; external?: boolean };
 
-// Chat is the rebranded Open-WebUI, never a Next.js route, so it is always a
-// full-page navigation. Path-based /chat needs Open-WebUI built with
-// PUBLIC_BASE_PATH=/chat (its assets and SPA routes are otherwise root-absolute);
-// with a stock build, point NEXT_PUBLIC_CHAT_URL at its own hostname instead.
+// Chat is the rebranded Open-WebUI, never a Next.js route -- it is launched from
+// the ChatButton below (always a new tab) rather than the sidebar nav. Path-based
+// /chat needs Open-WebUI built with PUBLIC_BASE_PATH=/chat (its assets and SPA
+// routes are otherwise root-absolute); with a stock build, point
+// NEXT_PUBLIC_CHAT_URL at its own hostname instead.
 const CHAT_URL = process.env.NEXT_PUBLIC_CHAT_URL || "/chat";
 
 const navItems: NavItem[] = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-  { href: CHAT_URL, label: "Chat", icon: MessagesSquare, external: true },
+  { href: "/dashboard/wallet", label: "Wallet", icon: WalletCards },
   { href: "/dashboard/api-keys", label: "API keys", icon: KeyRound },
   { href: "/dashboard/usage", label: "Usage", icon: BarChart3 },
   { href: "/dashboard/billing", label: "Billing", icon: CreditCard },
-  { href: "/dashboard/playground", label: "Playground", icon: MessageSquareText },
   { href: "/dashboard/settings", label: "Settings", icon: Settings }
 ];
 
@@ -51,7 +133,7 @@ const navItemClass = (active: boolean) =>
     "pointer-events-auto flex h-10 items-center gap-3 border-l-2 border-transparent px-4 text-[11px] font-medium uppercase tracking-label transition-colors duration-fast ease-standard",
     active
       ? "border-l-foreground bg-elevated text-foreground"
-      : "text-muted-foreground hover:bg-onyx hover:text-foreground"
+      : "text-muted-foreground hover:bg-card hover:text-foreground"
   );
 
 const navItemClassMobile = (active: boolean) =>
@@ -66,6 +148,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { activePath, isPending, markPendingHref } = usePendingNavPath(pathname);
   const { user, logout, ensureSsoCookie } = useAuth();
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = React.useState(false);
 
   // Chat lives behind a front door that authenticates by the httpOnly SSO cookie.
   // Navigating there before that cookie is in place gets the user bounced to the
@@ -121,10 +204,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthGate requireAuth>
-      <div className="min-h-screen bg-background">
-        {/* Onyx rail against the Void Black page: hierarchy from tone, with a
-            single Graphite hairline doing the partitioning. */}
-        <aside className="pointer-events-auto fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-border bg-onyx lg:block">
+      <div className="min-h-dvh bg-background">
+        {/* One step of tone off the page (Onyx-on-Void in dark, white-on-Off-White
+            in light), with a single hairline doing the partitioning -- `bg-card`
+            so this tracks the active theme instead of being pinned dark. */}
+        <aside className="pointer-events-auto fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-border bg-card lg:block">
           <div className="flex h-full flex-col">
             <div className="flex h-16 items-center border-b border-border px-5">
               <AppLogo />
@@ -138,27 +222,39 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 </p>
                 <p className="metadata mt-0.5 truncate text-xs">{user?.email}</p>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-3 w-full justify-start"
-                onClick={() => void logout()}
-              >
-                <LogOut strokeWidth={1.5} />
-                Log out
-              </Button>
+              <div className="mt-3 flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 justify-start"
+                  onClick={() => setLogoutConfirmOpen(true)}
+                >
+                  <LogOut strokeWidth={1.5} />
+                  Log out
+                </Button>
+                <ThemeToggle />
+              </div>
             </div>
           </div>
         </aside>
 
         <div className="lg:pl-64">
-          <header className="pointer-events-auto sticky top-0 z-20 border-b border-border bg-void/85 backdrop-blur-[8px] lg:hidden">
-            <div className="flex h-16 items-center justify-between px-4">
+          {/* Desktop-only top bar: the sidebar carries logo/account chrome, so this
+              strip exists solely to put Chat top-right, per HYP-52. */}
+          <div className="pointer-events-auto sticky top-0 z-20 hidden items-center justify-end border-b border-border bg-background/85 px-6 py-3 backdrop-blur-[8px] lg:flex">
+            <ChatButton ensureSsoCookie={ensureSsoCookie} />
+          </div>
+          <header className="pointer-events-auto sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur-[8px] lg:hidden">
+            <div className="flex h-16 items-center justify-between gap-2 px-4">
               <AppLogo />
-              <Button variant="outline" size="sm" onClick={() => void logout()}>
-                <LogOut strokeWidth={1.5} />
-                Log out
-              </Button>
+              <div className="flex items-center gap-2">
+                <ChatButton ensureSsoCookie={ensureSsoCookie} />
+                <ThemeToggle />
+                <Button variant="outline" size="sm" onClick={() => setLogoutConfirmOpen(true)}>
+                  <LogOut strokeWidth={1.5} />
+                  Log out
+                </Button>
+              </div>
             </div>
             <div className="border-t border-border px-4 py-2">
               <AttestationBadge />
@@ -170,8 +266,17 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           <main className="page-shell py-8 lg:py-12">
             {isPending ? <PageLoadingState /> : children}
           </main>
+          <SiteFooter />
         </div>
       </div>
+      <LogoutConfirmDialog
+        open={logoutConfirmOpen}
+        onOpenChange={setLogoutConfirmOpen}
+        onConfirm={() => {
+          setLogoutConfirmOpen(false);
+          void logout();
+        }}
+      />
     </AuthGate>
   );
 }
