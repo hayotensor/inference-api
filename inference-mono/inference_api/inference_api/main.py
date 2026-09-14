@@ -22,6 +22,7 @@ from inference_api.provisioner.loop import ProvisionerLoop
 from inference_api.redis import close_redis, get_redis_client
 from inference_api.router_routes import router as router_service_router
 from inference_api.stats_routes import router as miner_stats_router
+from inference_api.status_routes import router as status_router
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ def _expand_loopback_origins(origins: list[str]) -> list[str]:
 _PUBLIC_THROTTLE_PATH_PREFIXES: tuple[str, ...] = (
     "/allowlist",
     "/subnet/stats",
+    "/status",
     "/docs",
     "/redoc",
     "/openapi.json",
@@ -241,6 +243,7 @@ def create_app() -> FastAPI:
     app.include_router(miners_router)
     app.include_router(allowlist_router)
     app.include_router(miner_stats_router)
+    app.include_router(status_router)
     return app
 
 

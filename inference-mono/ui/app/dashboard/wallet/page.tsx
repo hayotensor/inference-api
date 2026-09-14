@@ -3,11 +3,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, RefreshCw, Trash2, WalletCards } from "lucide-react";
 import { toast } from "sonner";
+import { useAccount, useSignMessage } from "wagmi";
 
 import { DashboardPageHeader } from "@/components/dashboard-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
+import { NoWalletNotice } from "@/components/no-wallet-notice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { WalletConnectButton } from "@/components/wallet-connect-button";
 import {
   Card,
   CardContent,
@@ -26,12 +29,11 @@ import {
 import { apiErrorMessage, walletsApi } from "@/lib/api";
 import { formatDateTime, formatNumber, shortenAddress } from "@/lib/format";
 import type { BalanceSyncResponse } from "@/lib/types";
-import { useBrowserWallet } from "@/lib/use-browser-wallet";
 
 export default function WalletPage() {
   const queryClient = useQueryClient();
-  const { address, connect, hasProvider, isConnected, isConnecting, signMessage } =
-    useBrowserWallet();
+  const { address, isConnected } = useAccount();
+  const { signMessageAsync } = useSignMessage();
 
   const walletQuery = useQuery({
     queryKey: ["wallet-evm"],
@@ -42,7 +44,7 @@ export default function WalletPage() {
     mutationFn: async () => {
       if (!address) throw new Error("Connect a wallet first.");
       const nonce = await walletsApi.nonce(address);
-      const signature = await signMessage(nonce.message);
+      const signature = await signMessageAsync({ message: nonce.message });
       return walletsApi.verify({
         address: nonce.address,
         message: nonce.message,
@@ -85,19 +87,17 @@ export default function WalletPage() {
       <DashboardPageHeader
         title="Wallet"
         description="Wallet ownership is verified by signing a backend-provided nonce."
-        action={
-          <Button onClick={connect} disabled={isConnecting || !hasProvider}>
-            {isConnecting ? <Loader2 className="animate-spin" /> : <WalletCards />}
-            {isConnected ? "Switch wallet" : "Connect wallet"}
-          </Button>
-        }
+        action={<WalletConnectButton />}
       />
 
       <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
         <Card>
           <CardHeader>
             <CardTitle>EVM wallet</CardTitle>
-            <CardDescription>Browser wallet connection stays in the frontend.</CardDescription>
+            <CardDescription>
+              Connect any wallet -- a browser extension or, via WalletConnect, a mobile or
+              hardware wallet -- then verify it below to link it to your account.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="rounded-lg border bg-muted/35 p-4">
@@ -108,9 +108,18 @@ export default function WalletPage() {
                 </Badge>
               </div>
               <p className="mt-2 break-all font-mono text-sm">
-                {address ?? (hasProvider ? "Connect a browser wallet" : "No browser wallet detected")}
+                {address ?? "Connect a wallet to continue"}
               </p>
             </div>
+
+            <NoWalletNotice />
+
+            {!isConnected ? (
+              <EmptyState
+                title="No wallet connected"
+                description="Use Connect wallet above to link any EVM wallet -- MetaMask, Rabby, and Coinbase Wallet's extension connect directly, and WalletConnect covers mobile and hardware wallets by QR code."
+              />
+            ) : null}
 
             {walletQuery.isLoading ? <LoadingState /> : null}
             {walletQuery.isError ? <ErrorState error={walletQuery.error} /> : null}

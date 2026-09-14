@@ -459,3 +459,23 @@ export interface AttestationStatusResponse {
   // is ever rendered as if it were checked.
   entries?: AttestedModelEntry[];
 }
+
+// HYP-58: live per-model service status, proxied from the inference-api's
+// public `GET /status/models` (see app/api/status/route.ts and
+// inference_api/status_routes.py, the producer). A snapshot of current miner
+// availability -- not a historical uptime log.
+export type ModelServiceStatus = "operational" | "degraded" | "down";
+
+export interface ModelStatusEntry {
+  model_id: string;
+  label: string | null;
+  status: ModelServiceStatus;
+  healthy_miner_count: number;
+  registered_miner_count: number;
+}
+
+export interface StatusResponse {
+  generated_at: string;
+  overall_status: ModelServiceStatus;
+  models: ModelStatusEntry[];
+}

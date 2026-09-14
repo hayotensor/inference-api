@@ -1,21 +1,25 @@
 "use client";
 
 import Link from "next/link";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, Loader2, WalletCards } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { useAccount, useSignMessage } from "wagmi";
 import { z } from "zod";
 
 import { AuthFormShell } from "@/components/auth-form-shell";
+import { NoWalletNotice } from "@/components/no-wallet-notice";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { apiErrorMessage, authApi } from "@/lib/api";
 import { AuthGate, navigateAfterAuth, safeNextPath, useAuth } from "@/lib/auth";
+import { shortenAddress } from "@/lib/format";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -27,6 +31,8 @@ type LoginForm = z.infer<typeof loginSchema>;
 export default function LoginPage() {
   const router = useRouter();
   const { setTokenResponse, ensureSsoCookie } = useAuth();
+  const { address } = useAccount();
+  const { signMessageAsync } = useSignMessage();
   const form = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: "", password: "" }
@@ -49,11 +55,26 @@ export default function LoginPage() {
     onError: (error) => toast.error(apiErrorMessage(error))
   });
 
+  const walletLoginMutation = useMutation({
+    mutationFn: async () => {
+      if (!address) throw new Error("Connect a wallet first.");
+      const nonce = await authApi.walletLoginNonce(address);
+      const signature = await signMessageAsync({ message: nonce.message });
+      return authApi.walletLoginVerify({
+        address: nonce.address,
+        message: nonce.message,
+        signature
+      });
+    },
+    onSuccess: onAuthenticated,
+    onError: (error) => toast.error(apiErrorMessage(error))
+  });
+
   return (
     <AuthGate guestOnly>
       <AuthFormShell
         title="Log in"
-        description="Use your email and password, or continue with Google."
+        description="Use your email and password, continue with Google, or sign in with a browser wallet."
         footer={
           <>
             Need an account?{" "}
@@ -102,7 +123,41 @@ export default function LoginPage() {
           <Button variant="outline" asChild>
             <a href={authApi.oauthLoginUrl("google")}>Continue with Google</a>
           </Button>
+          {address ? (
+            <Button
+              variant="outline"
+              onClick={() => walletLoginMutation.mutate()}
+              disabled={walletLoginMutation.isPending}
+            >
+              {walletLoginMutation.isPending ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <WalletCards />
+              )}
+              Sign in with wallet ({shortenAddress(address)})
+            </Button>
+          ) : (
+            <ConnectButton.Custom>
+              {({ openConnectModal, mounted }) => (
+                <Button
+                  variant="outline"
+                  onClick={openConnectModal}
+                  disabled={!mounted}
+                >
+                  <WalletCards />
+                  Sign in with wallet
+                </Button>
+              )}
+            </ConnectButton.Custom>
+          )}
         </div>
+
+        <p className="mt-3 text-center text-xs text-muted-foreground">
+          Connect an EVM wallet -- a browser extension, or a mobile/hardware wallet via
+          WalletConnect -- then sign a message to prove ownership. No password is created.
+        </p>
+
+        <NoWalletNotice className="mt-3" />
 
         <div className="mt-5 text-center text-sm">
           <Link href="/forgot-password" className="text-primary hover:underline">
