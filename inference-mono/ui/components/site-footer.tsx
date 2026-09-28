@@ -45,6 +45,12 @@ export function SiteFooter() {
           >
             Pricing
           </Link>
+          <Link
+            href="/status"
+            className="focus-ring text-[11px] font-medium uppercase tracking-label text-muted-foreground transition-colors duration-fast ease-standard hover:text-foreground"
+          >
+            Status
+          </Link>
           <a
             href="mailto:contact@talaris.xyz"
             className="focus-ring text-[11px] font-medium uppercase tracking-label text-muted-foreground transition-colors duration-fast ease-standard hover:text-foreground"

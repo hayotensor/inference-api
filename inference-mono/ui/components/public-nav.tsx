@@ -49,12 +49,6 @@ export function PublicNav() {
           >
             Pricing
           </Link>
-          <Link
-            href="/status"
-            className="focus-ring text-[11px] font-medium uppercase tracking-label text-muted-foreground transition-colors duration-fast ease-standard hover:text-foreground"
-          >
-            Status
-          </Link>
         </nav>
         <div className="flex items-center gap-2">
           {isAuthenticated ? (
