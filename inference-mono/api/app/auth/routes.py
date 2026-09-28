@@ -24,11 +24,13 @@ from app.auth.phone import (
     PhoneVerifyOTP,
 )
 from app.auth.schemas import (
+    ChangePasswordRequest,
     EmailPasswordLogin,
     ForgotPasswordRequest,
     LogoutRequest,
     MessageResponse,
     RefreshRequest,
+    RegisterRequest,
     RequestVerifyEmail,
     ResetPasswordRequest,
     SSOTokenResponse,
@@ -37,6 +39,7 @@ from app.auth.schemas import (
 )
 from app.auth.service import (
     AuthService,
+    IncorrectPasswordError,
     UserManager,
     current_active_user,
     get_user_manager,
@@ -53,11 +56,12 @@ from app.auth.token_revocation import extract_bearer_token
 from app.core.config import settings
 from app.core.errors import bad_request, unauthorized
 from app.core.rate_limit import limiter
-from app.core.security import is_synthetic_phone_email
+from app.core.security import is_synthetic_phone_email, is_synthetic_wallet_email
 from app.db.models.phone_verification_code import PhoneVerificationPurpose
 from app.db.models.user import User
 from app.db.session import get_async_session
-from app.users.schemas import UserCreate, UserRead
+from app.referrals.service import ReferralService
+from app.users.schemas import UserCreatePublic, UserRead
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -87,18 +91,35 @@ async def get_wallet_auth_service(
 @limiter.limit("5/minute")
 async def register(
     request: Request,
-    payload: UserCreate,
+    payload: RegisterRequest,
     session: AsyncSession = Depends(get_async_session),
     user_manager: UserManager = Depends(get_user_manager),
 ) -> User:
     try:
-        user = await user_manager.create(payload, safe=True, request=request)
+        # safe=True is belt-and-suspenders here: UserCreatePublic never had
+        # is_active/is_superuser/is_verified fields for a caller to set in
+        # the first place (see app/users/schemas.py), but this keeps the
+        # call shape identical to every other UserManager.create() usage.
+        #
+        # Built as a bare UserCreatePublic here (not `payload` itself, which
+        # is a RegisterRequest) so its extra HYP-65 `referral_code` field can
+        # never reach create_update_dict() -> user_db.create(): User has no
+        # such column. See RegisterRequest's docstring.
+        user = await user_manager.create(
+            UserCreatePublic(email=payload.email, password=payload.password, full_name=payload.full_name),
+            safe=True,
+            request=request,
+        )
     except UserAlreadyExists as exc:
         raise bad_request("user_exists", "A user with this email already exists") from exc
     except InvalidPasswordException as exc:
         raise bad_request("invalid_password", exc.reason) from exc
 
     await write_audit_log(session, "auth.register", user_id=user.id, request=request)
+    # HYP-65: fixed at signup, never re-attributed later. A missing/unknown
+    # code is silently ignored (see attribute_signup) so it can never block
+    # registration.
+    await ReferralService(session).attribute_signup(user, payload.referral_code)
     await session.commit()
     if settings.auto_verify_new_users:
         # Dev/demo shortcut: treat the address as proven and send no email, so a
@@ -186,7 +207,7 @@ async def request_verify_email(
     payload: RequestVerifyEmail,
     user_manager: UserManager = Depends(get_user_manager),
 ) -> MessageResponse:
-    if is_synthetic_phone_email(str(payload.email)):
+    if is_synthetic_phone_email(str(payload.email)) or is_synthetic_wallet_email(str(payload.email)):
         return MessageResponse(detail="If the account exists, a verification email has been sent")
     try:
         user = await user_manager.get_by_email(payload.email)
@@ -244,6 +265,28 @@ async def reset_password(
     await write_audit_log(session, "auth.password_reset", user_id=user.id, request=request)
     await session.commit()
     return MessageResponse(detail="Password has been reset")
+
+
+@router.post("/change-password", response_model=MessageResponse)
+@limiter.limit("5/minute")
+async def change_password(
+    request: Request,
+    payload: ChangePasswordRequest,
+    session: AsyncSession = Depends(get_async_session),
+    user_manager: UserManager = Depends(get_user_manager),
+    user: User = Depends(current_active_user),
+) -> MessageResponse:
+    try:
+        await user_manager.change_password(
+            user, payload.current_password, payload.new_password, request
+        )
+    except IncorrectPasswordError as exc:
+        raise bad_request("incorrect_current_password", "Current password is incorrect") from exc
+    except InvalidPasswordException as exc:
+        raise bad_request("invalid_password", exc.reason) from exc
+    await write_audit_log(session, "auth.password_changed", user_id=user.id, request=request)
+    await session.commit()
+    return MessageResponse(detail="Password has been changed")
 
 
 async def _oauth_login(request: Request, provider: Literal["google", "apple"]):

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +20,18 @@ from app.db.models.user_billing_account import UserBillingAccount
 from app.db.models.user_subscription import UserSubscription
 from app.db.models.user_wallet import UserWallet
 from app.db.models.wallet_transaction import WalletTransaction
+
+
+def _plan_rate_cents_per_token(plan: BillingPlan | None) -> Decimal | None:
+    """HYP-65: a plan's effective $/token rate (its *monthly* price divided by
+    its monthly token allowance, regardless of whether the referred user is
+    actually billed monthly or annually -- that's the rate the ticket
+    specifies). None for a plan with no defined per-token economics: no price
+    (the Free plan) or no allowance ceiling at all (HYP-76's `is_unlimited`
+    plans, which would otherwise divide by zero)."""
+    if plan is None or plan.price_cents <= 0 or plan.monthly_token_allowance <= 0:
+        return None
+    return Decimal(plan.price_cents) / Decimal(plan.monthly_token_allowance)
 
 
 def _obj_get(value: Any, key: str, default: Any = None) -> Any:
@@ -226,6 +239,24 @@ class BillingService:
             )
         )
         await self.session.flush()
+
+        # HYP-65: a wallet top-up is a real payment too, and one-time
+        # (mode="payment") Checkout Sessions never produce a Stripe invoice --
+        # so this is the only place a wallet top-up can trigger a referral
+        # credit (contrast with _credit_referral_for_invoice, the
+        # subscription-invoice.paid side). Uses the bundle's own already-known
+        # $/token rate, per the HYP-65 spec.
+        bundle_id = metadata.get("bundle_id")
+        bundle = wallet_topup_bundle(str(bundle_id)) if bundle_id else None
+        if bundle is not None and payment_intent_id:
+            from app.referrals.service import ReferralService
+
+            await ReferralService(self.session).credit_for_payment(
+                referred_user_id=user_id,
+                amount_cents=bundle.usd_cents,
+                source_id=payment_intent_id,
+                rate_cents_per_token=Decimal(bundle.usd_cents) / Decimal(bundle.tokens),
+            )
 
     async def _lock_or_create_wallet(self, user_id: uuid.UUID) -> UserWallet:
         wallet = (
@@ -490,10 +521,55 @@ class BillingService:
             return
         try:
             subscription = self.stripe_client.retrieve_subscription(str(subscription_id))
-            await self.sync_subscription_object(subscription)
+            synced = await self.sync_subscription_object(subscription)
         except Exception:
             if event_type == "invoice.payment_failed":
                 await self._mark_subscription_status(str(subscription_id), "past_due")
+            return
+        if event_type == "invoice.paid" and synced is not None:
+            await self._credit_referral_for_invoice(invoice, synced)
+
+    async def _credit_referral_for_invoice(self, invoice: Any, subscription: UserSubscription) -> None:
+        """HYP-65: the subscription-invoice.paid side of referral crediting
+        (see _credit_wallet_topup for the one-time wallet top-up side, which
+        never reaches here since those don't produce invoices)."""
+        invoice_id = _obj_get(invoice, "id")
+        amount_paid = _obj_get(invoice, "amount_paid")
+        if not invoice_id or not amount_paid:
+            return
+        plan = (
+            await self.session.get(BillingPlan, subscription.plan_id)
+            if subscription.plan_id is not None
+            else None
+        )
+        rate = _plan_rate_cents_per_token(plan)
+        if rate is None:
+            # No defined per-token rate on this plan -- currently only
+            # HYP-76's is_unlimited tier (see _plan_rate_cents_per_token).
+            # The HYP-65 spec calls for referral credit to apply "normally"
+            # to Unlimited with "no special case needed", but its allowance is
+            # 0, so the plan's own price/allowance ratio is undefined rather
+            # than merely large. Falling back to Business's bulk rate as the
+            # reference conversion keeps referral credit flowing for an
+            # Unlimited referral (matching the spec's intent) without
+            # dividing by zero; see the HYP-65 report for this judgment call.
+            rate = await self._fallback_referral_rate()
+        if rate is None:
+            return
+        from app.referrals.service import ReferralService
+
+        await ReferralService(self.session).credit_for_payment(
+            referred_user_id=subscription.user_id,
+            amount_cents=int(amount_paid),
+            source_id=str(invoice_id),
+            rate_cents_per_token=rate,
+        )
+
+    async def _fallback_referral_rate(self) -> Decimal | None:
+        result = await self.session.execute(
+            select(BillingPlan).where(or_(BillingPlan.slug == "business", BillingPlan.name == "Business"))
+        )
+        return _plan_rate_cents_per_token(result.scalar_one_or_none())
 
     async def sync_subscription_object(self, subscription_object: Any) -> UserSubscription | None:
         metadata = _metadata(subscription_object)

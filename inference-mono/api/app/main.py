@@ -21,6 +21,7 @@ from app.core.logging import configure_logging, request_id_ctx
 from app.core.rate_limit import ClientIPMiddleware, limiter
 from app.core.redis import close_redis
 from app.internal.routes import router as internal_router
+from app.referrals.routes import router as referrals_router
 from app.usage.routes import router as usage_router
 from app.users.routes import router as users_router
 from app.wallets.routes import router as wallets_router
@@ -29,6 +30,26 @@ logger = logging.getLogger(__name__)
 
 _LOOPBACK_HOST_SPELLINGS = ("localhost", "127.0.0.1", "[::1]")
 _LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
+
+# The blanket `default-src 'none'` below is the right default for a JSON API
+# (see security_headers_middleware), but FastAPI's built-in /docs and /redoc
+# pages are real HTML documents that load Swagger UI / ReDoc's JS+CSS from a
+# CDN and (ReDoc) Google Fonts, plus an inline `<script>`/`<style>` block --
+# `default-src 'none'` blocks every one of those, so the pages render as a
+# blank shell (HYP-23). These paths get a scoped, still-explicit-allowlist
+# CSP instead of no CSP at all; everything else keeps the strict default.
+_DOCS_CSP_PATHS = frozenset({"/docs", "/redoc", "/docs/oauth2-redirect"})
+_DEFAULT_CSP = "default-src 'none'; frame-ancestors 'none'"
+_DOCS_CSP = (
+    "default-src 'none'; "
+    "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+    "img-src 'self' data: https://cdn.jsdelivr.net; "
+    "font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com; "
+    "connect-src 'self'; "
+    "worker-src 'self' blob:; "
+    "frame-ancestors 'none'"
+)
 
 
 def _expand_loopback_origins(origins: list[str]) -> list[str]:
@@ -149,9 +170,8 @@ def create_app() -> FastAPI:
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        response.headers.setdefault(
-            "Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"
-        )
+        csp = _DOCS_CSP if request.url.path in _DOCS_CSP_PATHS else _DEFAULT_CSP
+        response.headers.setdefault("Content-Security-Policy", csp)
         # HSTS only makes sense once we know the request was actually served
         # over HTTPS. `request.url.scheme` reflects `scope["scheme"]`, which
         # uvicorn's ProxyHeadersMiddleware only sets from X-Forwarded-Proto
@@ -193,6 +213,7 @@ def create_app() -> FastAPI:
     app.include_router(billing_router)
     app.include_router(wallets_router)
     app.include_router(usage_router)
+    app.include_router(referrals_router)
     app.include_router(internal_router)
     return app
 

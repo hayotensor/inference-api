@@ -8,7 +8,7 @@ from fastapi_users.db import SQLAlchemyBaseUserTableUUID
 from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.security import utcnow
+from app.core.security import is_synthetic_phone_email, is_synthetic_wallet_email, utcnow
 from app.db.base import Base
 
 if TYPE_CHECKING:
@@ -25,6 +25,11 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
     __tablename__ = "users"
 
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # HYP-65: this user's own shareable referral code. Generated lazily (see
+    # app/referrals/service.py `ensure_referral_code`) on first access to
+    # GET /referrals/me, not at signup -- an account that never opens the
+    # Referrals page never needs one. Nullable until then.
+    referral_code: Mapped[str | None] = mapped_column(String(16), unique=True, index=True)
     phone_number: Mapped[str | None] = mapped_column(String(32), unique=True, index=True)
     phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     wallet_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -78,3 +83,17 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
         something the user should be able to silently change in Settings.
         """
         return [account.oauth_name for account in self.oauth_accounts]
+
+    @property
+    def has_verifiable_email(self) -> bool:
+        """False when ``email`` is a synthetic placeholder with no real inbox.
+
+        Phone-only and wallet-only accounts get a synthetic
+        ``phone_<hash>@...``/``wallet_<hash>@...`` address (see
+        ``synthetic_phone_email``/``synthetic_wallet_email`` in
+        ``app.core.security``) so the ``users.email`` column can stay
+        NOT NULL/unique without the account ever supplying a real one. There
+        is nowhere for a "verify your email" message to go for those, so the
+        UI uses this to hide that action instead of sending it into a void.
+        """
+        return not (is_synthetic_phone_email(self.email) or is_synthetic_wallet_email(self.email))

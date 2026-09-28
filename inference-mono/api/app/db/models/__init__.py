@@ -17,6 +17,8 @@ from app.db.models.model_pricing import ModelPricing
 from app.db.models.oauth_account import OAuthAccount
 from app.db.models.password_reset_token import PasswordResetToken
 from app.db.models.phone_verification_code import PhoneVerificationCode, PhoneVerificationPurpose
+from app.db.models.referral import Referral
+from app.db.models.referral_earning import ReferralEarning
 from app.db.models.refresh_token import RefreshToken
 from app.db.models.service_client import ServiceClient, ServiceClientRole
 from app.db.models.stripe_webhook_event import StripeWebhookEvent
@@ -54,6 +56,8 @@ __all__ = [
     "PasswordResetToken",
     "PhoneVerificationCode",
     "PhoneVerificationPurpose",
+    "Referral",
+    "ReferralEarning",
     "RefreshToken",
     "ServiceClient",
     "ServiceClientRole",

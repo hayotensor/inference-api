@@ -12,14 +12,17 @@ from app.db.base import Base
 # Kept as a plain string (not a DB enum) so a new kind can ship without a
 # migration, matching how app/db/models/manual_token_adjustment.py treats
 # `reason` as free text rather than a constrained column.
-WALLET_TRANSACTION_KINDS = ("purchase", "debit", "refund", "adjustment")
+WALLET_TRANSACTION_KINDS = ("purchase", "debit", "refund", "adjustment", "referral_bonus")
 
 
 class WalletTransaction(Base):
     """Ledger of every change to a UserWallet.balance_tokens (HYP-66): Stripe
     top-up purchases (kind="purchase"), inference spend once the subscription
-    allowance runs out (kind="debit", delta_tokens negative), and manual
-    corrections (kind="refund"/"adjustment")."""
+    allowance runs out (kind="debit", delta_tokens negative), manual
+    corrections (kind="refund"/"adjustment"), and HYP-65 referral bonuses
+    (kind="referral_bonus", credited to the referrer -- see
+    app/referrals/service.py and ReferralEarning for the matching ledger of
+    *why* each one happened)."""
 
     __tablename__ = "wallet_transactions"
 
