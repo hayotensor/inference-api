@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AppLogo } from "@/components/app-logo";
+import { ThemeToggle } from "@/components/public-nav";
 import {
   Card,
   CardContent,
@@ -23,7 +24,10 @@ export function AuthFormShell({
   return (
     <main className="min-h-dvh bg-background">
       <div className="page-shell flex min-h-dvh flex-col items-center justify-center py-10">
-        <AppLogo className="mb-10" />
+        <div className="mb-10 flex w-full max-w-md items-center justify-between">
+          <AppLogo />
+          <ThemeToggle />
+        </div>
         <Card className="w-full max-w-md">
           <CardHeader>
             <CardTitle>{title}</CardTitle>
