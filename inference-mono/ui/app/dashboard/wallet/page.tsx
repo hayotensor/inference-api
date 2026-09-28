@@ -117,7 +117,7 @@ export default function WalletPage() {
             {!isConnected ? (
               <EmptyState
                 title="No wallet connected"
-                description="Use Connect wallet above to link any EVM wallet -- MetaMask, Rabby, and Coinbase Wallet's extension connect directly, and WalletConnect covers mobile and hardware wallets by QR code."
+                description="Use Connect wallet above to link any EVM wallet: MetaMask, Rabby, and Coinbase Wallet's extension connect directly, and WalletConnect covers mobile and hardware wallets by QR code."
               />
             ) : null}
 

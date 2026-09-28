@@ -110,7 +110,7 @@ export default function StatusPage() {
 
             <p className="mt-6 flex items-center gap-1.5 text-xs text-muted-foreground">
               <Activity className="h-3.5 w-3.5" strokeWidth={1.5} />
-              Last checked {formatDateTime(data.generated_at)} -- refreshes automatically every 30
+              Last checked {formatDateTime(data.generated_at)}. Refreshes automatically every 30
               seconds.
             </p>
           </>

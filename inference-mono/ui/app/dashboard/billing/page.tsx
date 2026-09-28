@@ -67,7 +67,7 @@ export default function BillingPage() {
     mutationFn: ({ planId, interval: nextInterval }: { planId: string; interval: BillingInterval }) =>
       billingApi.changePlan(planId, nextInterval),
     onSuccess: async () => {
-      toast.success("Plan updated — Stripe will prorate the difference");
+      toast.success("Plan updated: Stripe will prorate the difference");
       await queryClient.invalidateQueries({ queryKey: ["billing-subscription"] });
       await queryClient.invalidateQueries({ queryKey: ["usage-allowance"] });
     },

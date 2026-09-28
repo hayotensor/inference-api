@@ -199,7 +199,7 @@ export function AttestationBadge() {
         </DialogHeader>
         <div className="space-y-2 text-sm text-muted-foreground">
           <p>
-            This runs independently on this app&apos;s own server -- it does not simply
+            This runs independently on this app&apos;s own server: it does not simply
             trust a flag the inference API hands back, and it does not trust the
             inference API&apos;s claimed signing key either. It checks that claimed key
             against <code className="font-mono text-xs text-foreground">PLATFORM_PUBKEY</code>, this
@@ -211,7 +211,7 @@ export function AttestationBadge() {
           {provenAt ? (
             <p>
               <span className="font-medium text-foreground">Proven at: </span>
-              {formatDateTime(provenAt.toISOString())} -- when this allowlist was last
+              {formatDateTime(provenAt.toISOString())}. This is when this allowlist was last
               (re)signed with its current content, not when this page happened to check it.
             </p>
           ) : null}
@@ -232,7 +232,7 @@ export function AttestationBadge() {
                       {entry.model_id}
                       {entry.model_version ? `@${entry.model_version}` : ""}
                     </code>{" "}
-                    — hash <code className="font-mono text-xs text-foreground">{entry.model_hash}</code>
+                    : hash <code className="font-mono text-xs text-foreground">{entry.model_hash}</code>
                     {entry.gpu_hash ? (
                       <>
                         {" "}
