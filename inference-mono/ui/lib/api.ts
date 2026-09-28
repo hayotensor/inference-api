@@ -21,16 +21,14 @@ import type {
   ApiKeyCreateResponse,
   ApiKeyRead,
   ApiKeyScope,
-  ApiKeyUsageSummary,
   BalanceSyncResponse,
   BillingInterval,
   BillingPlan,
   BillingSubscription,
   EvmNonceResponse,
   EvmWallet,
-  InferenceResponse,
+  GuestInferenceResponse,
   MessageResponse,
-  ModelListResponse,
   StripeSessionResponse,
   TokenResponse,
   UsageAllowance,
@@ -427,12 +425,21 @@ export const apiKeysApi = {
       signal: options.signal
     });
   },
+  // Known model ids a key could be scoped to (from currently-registered
+  // miners). Powers the "restrict to models" picker below.
+  availableModels(options: ApiCallOptions = {}) {
+    return apiRequest<string[]>("/api-keys/available-models", {
+      auth: true,
+      signal: options.signal
+    });
+  },
   create(payload: {
     name: string;
     environment: "test" | "live";
     scopes: ApiKeyScope[];
     expires_at?: string | null;
     rate_limit_per_minute?: number | null;
+    allowed_models?: string[] | null;
   }) {
     return apiRequest<ApiKeyCreateResponse>("/api-keys", {
       method: "POST",
@@ -447,6 +454,7 @@ export const apiKeysApi = {
       scopes?: ApiKeyScope[];
       expires_at?: string | null;
       rate_limit_per_minute?: number | null;
+      allowed_models?: string[] | null;
     }
   ) {
     return apiRequest<ApiKeyRead>(`/api-keys/${keyId}`, {
@@ -589,34 +597,6 @@ export const walletsApi = {
   }
 };
 
-export const productApi = {
-  models(apiKey: string, options: ApiCallOptions = {}) {
-    return apiRequest<ModelListResponse>("/v1/models", {
-      apiKey,
-      baseUrl: INFERENCE_API_BASE_URL,
-      signal: options.signal
-    });
-  },
-  inference(
-    apiKey: string,
-    payload: { model: string; prompt: string; max_tokens: number }
-  ) {
-    return apiRequest<InferenceResponse>("/v1/inference", {
-      method: "POST",
-      apiKey,
-      baseUrl: INFERENCE_API_BASE_URL,
-      body: payload
-    });
-  },
-  usage(apiKey: string, options: ApiCallOptions = {}) {
-    return apiRequest<ApiKeyUsageSummary>("/v1/usage", {
-      apiKey,
-      baseUrl: INFERENCE_API_BASE_URL,
-      signal: options.signal
-    });
-  }
-};
-
 export const adminApi = {
   me(options: ApiCallOptions = {}) {
     return apiRequest<AdminMe>("/admin/me", {
@@ -730,6 +710,7 @@ export const adminApi = {
       scopes?: ApiKeyScope[];
       expires_at?: string | null;
       rate_limit_per_minute?: number | null;
+      allowed_models?: string[] | null;
     }
   ) {
     return apiRequest<ApiKeyRead>(`/admin/api-keys/${keyId}`, {
@@ -898,6 +879,30 @@ export const adminApi = {
   statsBilling(options: ApiCallOptions = {}) {
     return apiRequest<AdminStatsBilling>("/admin/stats/billing", {
       auth: true,
+      signal: options.signal
+    });
+  }
+};
+
+/**
+ * The homepage's unauthenticated "try it now" sandbox (HYP-67). Goes through
+ * this Next.js server's own `/api/guest-inference` route (NOT
+ * `baseUrl: INFERENCE_API_BASE_URL` -- see that route's docstring for why:
+ * the inference-api is not reachable directly from the browser in this
+ * deployment), which forwards the real visitor IP onward. Identifies the
+ * browser with a soft, client-generated id -- see `lib/guest-id.ts`. The
+ * server independently caps this per-IP too; the client-side count this
+ * returns is only ever the per-browser one.
+ */
+export const guestApi = {
+  inference(prompt: string, guestId: string, options: ApiCallOptions = {}) {
+    return apiRequest<GuestInferenceResponse>("/api/guest-inference", {
+      method: "POST",
+      // Relative to the current origin -- this is a same-origin Next.js route,
+      // not the control-plane API that `apiRequest` targets by default.
+      baseUrl: "",
+      headers: { "X-Guest-Id": guestId },
+      body: { prompt },
       signal: options.signal
     });
   }

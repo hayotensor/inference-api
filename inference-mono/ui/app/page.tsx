@@ -2,28 +2,66 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowRight, ShieldCheck } from "lucide-react";
+import { ArrowRight, Loader2, ShieldCheck } from "lucide-react";
 
 import { PublicNav } from "@/components/public-nav";
 import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ApiError, apiErrorMessage, guestApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { buildChatPromptUrl } from "@/lib/chat-prompt";
+import { getOrCreateGuestId } from "@/lib/guest-id";
+
+/**
+ * The homepage's anonymous sandbox result (HYP-67). Signed-out visitors get a
+ * small number of free, capped-model, capped-length completions rendered
+ * right here instead of being sent to /login -- see `lib/api.ts#guestApi` and
+ * `inference_api/guest_routes.py` for the two server-enforced daily ceilings
+ * (per-browser AND per-IP) backing this.
+ */
+type SandboxState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "success"; output: string; remaining: number }
+  | { status: "limited"; message: string }
+  | { status: "error"; message: string };
 
 export default function HomePage() {
   const { isAuthenticated, ensureSsoCookie } = useAuth();
   const [prompt, setPrompt] = useState("");
+  const [sandbox, setSandbox] = useState<SandboxState>({ status: "idle" });
 
   async function handlePromptSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = prompt.trim();
     if (!trimmed) return;
+
+    if (!isAuthenticated) {
+      // No account yet: run it through the free, capped sandbox right here
+      // instead of bouncing to /login. Both the model and the response length
+      // are forced server-side, and the server independently caps this per
+      // browser AND per IP -- see guestApi's docstring.
+      setSandbox({ status: "loading" });
+      try {
+        const guestId = getOrCreateGuestId();
+        const result = await guestApi.inference(trimmed, guestId);
+        setSandbox({ status: "success", output: result.output, remaining: result.remaining_today });
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 429) {
+          setSandbox({ status: "limited", message: apiErrorMessage(error) });
+        } else {
+          setSandbox({ status: "error", message: apiErrorMessage(error) });
+        }
+      }
+      return;
+    }
+
     try {
       // Best-effort: mints the SSO cookie when a session exists so the new
-      // tab lands signed in; a no-op when signed out, in which case the
-      // chat app's own front door sends the visitor to /login and back.
+      // tab lands signed in.
       await ensureSsoCookie();
     } catch {
       // Still open the tab — the front door will redirect if needed.
@@ -69,24 +107,74 @@ export default function HomePage() {
                     value={prompt}
                     onChange={(event) => setPrompt(event.target.value)}
                     onKeyDown={handlePromptKeyDown}
-                    placeholder="Ask anything. Opens in a new chat tab — press Enter there to send."
+                    placeholder={
+                      isAuthenticated
+                        ? "Ask anything. Opens in a new chat tab — press Enter there to send."
+                        : "Try the free sandbox. A few requests a day, no account needed."
+                    }
                     rows={2}
                     className="min-h-[52px] flex-1 resize-none rounded-2xl border-transparent bg-transparent px-3 py-2.5 shadow-none hover:border-transparent"
                   />
                   <Button
                     type="submit"
                     size="lg"
-                    disabled={!prompt.trim()}
+                    disabled={!prompt.trim() || sandbox.status === "loading"}
                     className="rounded-2xl sm:shrink-0"
                   >
-                    Ask
-                    <ArrowRight strokeWidth={1.5} />
+                    {sandbox.status === "loading" ? (
+                      <Loader2 className="animate-spin" strokeWidth={1.5} />
+                    ) : (
+                      <>
+                        Ask
+                        <ArrowRight strokeWidth={1.5} />
+                      </>
+                    )}
                   </Button>
                 </div>
                 <p className="metadata mt-2 text-xs">
-                  Opens the chat app in a new tab with this prompt ready to send — nothing is
-                  sent until you press Enter there.
+                  {isAuthenticated
+                    ? "Opens the chat app in a new tab with this prompt ready to send — nothing is sent until you press Enter there."
+                    : "Free sandbox: a small number of short, capped-model replies per day, right on this page. Sign up for full access."}
                 </p>
+
+                {!isAuthenticated && sandbox.status !== "idle" ? (
+                  <Card className="mt-4">
+                    <CardContent className="p-4">
+                      {sandbox.status === "loading" ? (
+                        <p className="text-sm text-muted-foreground">Thinking…</p>
+                      ) : sandbox.status === "success" ? (
+                        <div className="space-y-2">
+                          <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                            {sandbox.output}
+                          </p>
+                          <p className="metadata text-xs">
+                            {sandbox.remaining > 0
+                              ? `${sandbox.remaining} free sandbox request${sandbox.remaining === 1 ? "" : "s"} left today.`
+                              : "That was your last free sandbox request for today."}{" "}
+                            <Link href="/signup" className="underline underline-offset-2">
+                              Sign up for full access
+                            </Link>
+                            .
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <p className="text-sm leading-relaxed text-muted-foreground">
+                            {sandbox.message}
+                          </p>
+                          {sandbox.status === "limited" ? (
+                            <p className="metadata text-xs">
+                              <Link href="/signup" className="underline underline-offset-2">
+                                Sign up for an API key
+                              </Link>{" "}
+                              to keep going.
+                            </p>
+                          ) : null}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ) : null}
               </form>
 
               <div className="mt-6 flex flex-col gap-3 sm:flex-row">

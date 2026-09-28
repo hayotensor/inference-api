@@ -6,8 +6,24 @@ export type ApiErrorDetail =
       code?: string;
       message?: string;
       detail?: string;
+      // Present on the guest-sandbox 429 (POST /v1/guest/inference) so the
+      // homepage can show "X remaining" without a second round trip.
+      remaining_today?: number;
     }
   | Array<unknown>;
+
+export interface GuestInferenceResponse {
+  id: string;
+  model: string;
+  output: string;
+  usage: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+  attested: boolean;
+  remaining_today: number;
+}
 
 export interface User {
   id: UUID;
@@ -54,6 +70,8 @@ export interface ApiKeyRead {
   prefix: string;
   last_four: string;
   scopes: ApiKeyScope[];
+  // null/empty = unrestricted (the key can reach every model).
+  allowed_models: string[] | null;
   rate_limit_per_minute: number;
   created_at: string;
   expires_at: string | null;
@@ -206,38 +224,6 @@ export interface BalanceSyncItem {
 export interface BalanceSyncResponse {
   wallet: EvmWallet;
   snapshots: BalanceSyncItem[];
-}
-
-export interface ModelInfo {
-  id: string;
-  object: "model";
-  owned_by: string;
-}
-
-export interface ModelListResponse {
-  object: "list";
-  data: ModelInfo[];
-}
-
-export interface InferenceResponse {
-  id: string;
-  object: "inference";
-  model: string;
-  output: string;
-  usage: {
-    input_tokens: number;
-    output_tokens: number;
-    total_tokens: number;
-    charged_tokens: number;
-    remaining_tokens: number;
-  };
-}
-
-export interface ApiKeyUsageSummary {
-  api_key_id: UUID;
-  requests: number;
-  input_tokens: number;
-  output_tokens: number;
 }
 
 export type AdminPermission =
