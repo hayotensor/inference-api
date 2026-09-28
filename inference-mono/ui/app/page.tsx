@@ -63,7 +63,7 @@ export default function HomePage() {
 
               <form onSubmit={handlePromptSubmit} className="mt-8 max-w-xl">
                 <Label htmlFor="home-prompt">Ask something</Label>
-                <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end">
+                <div className="mt-2 flex flex-col gap-2 rounded-3xl border border-border/70 bg-card/80 p-2 shadow-lg backdrop-blur-sm transition-colors focus-within:border-foreground/40 dark:bg-card/40 sm:flex-row sm:items-end">
                   <Textarea
                     id="home-prompt"
                     value={prompt}
@@ -71,9 +71,14 @@ export default function HomePage() {
                     onKeyDown={handlePromptKeyDown}
                     placeholder="Ask anything. Opens in a new chat tab — press Enter there to send."
                     rows={2}
-                    className="min-h-[52px] flex-1 resize-none"
+                    className="min-h-[52px] flex-1 resize-none rounded-2xl border-transparent bg-transparent px-3 py-2.5 shadow-none hover:border-transparent"
                   />
-                  <Button type="submit" size="lg" disabled={!prompt.trim()} className="sm:shrink-0">
+                  <Button
+                    type="submit"
+                    size="lg"
+                    disabled={!prompt.trim()}
+                    className="rounded-2xl sm:shrink-0"
+                  >
                     Ask
                     <ArrowRight strokeWidth={1.5} />
                   </Button>
