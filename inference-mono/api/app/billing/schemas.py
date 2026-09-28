@@ -69,3 +69,18 @@ class CancelSubscriptionRequest(BaseModel):
 class StripeWebhookResponse(BaseModel):
     received: bool
     processed: bool
+
+
+class WalletTopupBundleRead(BaseModel):
+    id: str
+    usd_cents: int
+    tokens: int
+    currency: str = "usd"
+
+
+class WalletCheckoutSessionRequest(BaseModel):
+    bundle_id: str
+
+
+class WalletBalanceRead(BaseModel):
+    balance_tokens: int

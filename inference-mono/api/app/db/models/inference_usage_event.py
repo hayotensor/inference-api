@@ -52,6 +52,13 @@ class InferenceUsageEvent(Base):
     raw_total_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     model_multiplier: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("1"), nullable=False)
     reserved_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    # HYP-66: the slice of reserved_tokens/charged_tokens drawn from UserWallet.
+    # balance_tokens rather than the period's subscription allowance. Tracked
+    # separately so settle/release/expire can reverse exactly the wallet portion
+    # of a reservation without re-deriving it from the (mutable) period totals.
+    wallet_reserved_tokens: Mapped[int] = mapped_column(
+        BigInteger, default=0, nullable=False, server_default="0"
+    )
     charged_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="reserved", index=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, nullable=False)

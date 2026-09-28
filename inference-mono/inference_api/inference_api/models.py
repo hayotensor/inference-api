@@ -86,6 +86,9 @@ class APIKey(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False)
     hashed_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     scopes: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    # Optional model allowlist, mirrored from app/db/models/api_key.py. NULL/empty
+    # = unrestricted; non-empty = the key may only reach these model ids.
+    allowed_models: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     rate_limit_per_minute: Mapped[int] = mapped_column(Integer, nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -260,11 +263,42 @@ class InferenceUsageEvent(Base):
     raw_total_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     model_multiplier: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("1"), nullable=False)
     reserved_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    # HYP-66: mirrors api/app/db/models/inference_usage_event.py's column of the
+    # same name -- the slice of reserved_tokens/charged_tokens drawn from
+    # UserWallet.balance_tokens instead of the period's subscription allowance.
+    wallet_reserved_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     charged_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="reserved", index=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, nullable=False)
     settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True, nullable=False)
+
+
+class UserWallet(Base):
+    """Mirrors api/app/db/models/user_wallet.py (HYP-66). The control plane owns
+    crediting this (Stripe wallet-topup webhook); this plane only reads/debits it
+    while reserving and settling live inference usage."""
+
+    __tablename__ = "user_wallets"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"), primary_key=True)
+    balance_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+
+class WalletTransaction(Base):
+    """Mirrors api/app/db/models/wallet_transaction.py (HYP-66)."""
+
+    __tablename__ = "wallet_transactions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=generate_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False)
+    delta_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(255), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True, nullable=False)
 
 

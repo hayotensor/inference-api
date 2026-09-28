@@ -4,8 +4,10 @@ import calendar
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_CEILING, Decimal
+from typing import Any
 
 from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from inference_api.billing_plans import seed_default_billing_plans
@@ -20,6 +22,8 @@ from inference_api.models import (
     UsagePeriod,
     User,
     UserSubscription,
+    UserWallet,
+    WalletTransaction,
 )
 from inference_api.pricing import ModelPricingService
 from inference_api.security import as_utc, expires_in, utcnow
@@ -119,11 +123,15 @@ class UsageService:
         expired = 0
         for event in result.scalars():
             period = await self._lock_period(event.usage_period_id)
-            period.used_tokens = max(0, period.used_tokens - event.reserved_tokens)
+            period_portion = event.reserved_tokens - event.wallet_reserved_tokens
+            period.used_tokens = max(0, period.used_tokens - period_portion)
             period.remaining_tokens = max(0, period.total_allowance - period.used_tokens)
+            to_add = [period, event]
+            if event.wallet_reserved_tokens:
+                to_add.extend(await self._refund_wallet(event.user_id, event.wallet_reserved_tokens))
             event.status = "expired"
             event.released_at = now
-            self.session.add_all([period, event])
+            self.session.add_all(to_add)
             expired += 1
         if expired:
             await self.session.flush()
@@ -171,8 +179,17 @@ class UsageService:
         multiplier = await ModelPricingService(self.session).multiplier_for_model(model)
         estimated_raw_tokens = prompt_tokens + max_completion_tokens
         reserved_tokens = charged_token_count(estimated_raw_tokens, multiplier)
-        if locked_period.remaining_tokens < reserved_tokens:
-            raise payment_required("Insufficient inference token balance")
+
+        # HYP-66: once the subscription allowance for the period is exhausted,
+        # draw the rest from the pay-as-you-go wallet instead of 402ing outright.
+        # Mirrors api/app/usage/service.py.
+        allowance_portion = min(reserved_tokens, locked_period.remaining_tokens)
+        wallet_portion = reserved_tokens - allowance_portion
+        wallet: UserWallet | None = None
+        if wallet_portion > 0:
+            wallet = await self._lock_or_create_wallet(user.id)
+            if wallet.balance_tokens < wallet_portion:
+                raise payment_required("Insufficient inference token balance")
 
         event = InferenceUsageEvent(
             usage_period_id=locked_period.id,
@@ -188,13 +205,22 @@ class UsageService:
             raw_total_tokens=estimated_raw_tokens,
             model_multiplier=multiplier,
             reserved_tokens=reserved_tokens,
+            wallet_reserved_tokens=wallet_portion,
             charged_tokens=0,
             status="reserved",
             expires_at=expires_at or expires_in(seconds=settings.router_reservation_ttl_seconds),
         )
-        locked_period.used_tokens += reserved_tokens
+        locked_period.used_tokens += allowance_portion
         locked_period.remaining_tokens = max(0, locked_period.total_allowance - locked_period.used_tokens)
-        self.session.add_all([locked_period, event])
+        to_add = [locked_period, event]
+        if wallet_portion > 0:
+            assert wallet is not None
+            wallet.balance_tokens -= wallet_portion
+            to_add.append(wallet)
+            to_add.append(
+                WalletTransaction(user_id=user.id, delta_tokens=-wallet_portion, kind="debit")
+            )
+        self.session.add_all(to_add)
         await self.session.flush()
         return event
 
@@ -215,18 +241,47 @@ class UsageService:
         period = await self._lock_period(event.usage_period_id)
         raw_total = prompt_tokens + completion_tokens
         charged_tokens = charged_token_count(raw_total, Decimal(event.model_multiplier))
-        delta = charged_tokens - event.reserved_tokens
-        if delta > 0 and period.remaining_tokens < delta:
+
+        # HYP-66: re-split the final charged_tokens between the period allowance
+        # and the wallet, releasing this event's own reservation first so
+        # settling it neither double-counts nor double-debits. Mirrors
+        # api/app/usage/service.py.
+        old_period_portion = event.reserved_tokens - event.wallet_reserved_tokens
+        old_wallet_portion = event.wallet_reserved_tokens
+        available_allowance = period.remaining_tokens + old_period_portion
+        new_period_portion = min(charged_tokens, available_allowance)
+        new_wallet_portion = charged_tokens - new_period_portion
+
+        wallet: UserWallet | None = None
+        if new_wallet_portion > 0 or old_wallet_portion > 0:
+            wallet = await self._lock_or_create_wallet(event.user_id)
+        available_wallet = (wallet.balance_tokens if wallet is not None else 0) + old_wallet_portion
+        if new_wallet_portion > available_wallet:
             raise payment_required("Insufficient inference token balance")
-        period.used_tokens = max(0, period.used_tokens + delta)
+
+        period.used_tokens = max(0, period.used_tokens - old_period_portion + new_period_portion)
         period.remaining_tokens = max(0, period.total_allowance - period.used_tokens)
+        to_add = [period, event]
+        wallet_net_delta = old_wallet_portion - new_wallet_portion
+        if wallet_net_delta != 0:
+            assert wallet is not None
+            wallet.balance_tokens += wallet_net_delta
+            to_add.append(wallet)
+            to_add.append(
+                WalletTransaction(
+                    user_id=event.user_id,
+                    delta_tokens=wallet_net_delta,
+                    kind="refund" if wallet_net_delta > 0 else "debit",
+                )
+            )
         event.prompt_tokens = prompt_tokens
         event.completion_tokens = completion_tokens
         event.raw_total_tokens = raw_total
         event.charged_tokens = charged_tokens
+        event.wallet_reserved_tokens = new_wallet_portion
         event.status = "settled"
         event.settled_at = utcnow()
-        self.session.add_all([period, event])
+        self.session.add_all(to_add)
         await self.session.flush()
         return event
 
@@ -237,11 +292,15 @@ class UsageService:
             await self.expire_stale_reservations(event.user_id)
             return
         period = await self._lock_period(event.usage_period_id)
-        period.used_tokens = max(0, period.used_tokens - event.reserved_tokens)
+        period_portion = event.reserved_tokens - event.wallet_reserved_tokens
+        period.used_tokens = max(0, period.used_tokens - period_portion)
         period.remaining_tokens = max(0, period.total_allowance - period.used_tokens)
+        to_add = [period, event]
+        if event.wallet_reserved_tokens:
+            to_add.extend(await self._refund_wallet(event.user_id, event.wallet_reserved_tokens))
         event.status = "released"
         event.released_at = utcnow()
-        self.session.add_all([period, event])
+        self.session.add_all(to_add)
         await self.session.flush()
 
     async def recalculate_current_period(self, user: User) -> UsagePeriod:
@@ -333,6 +392,35 @@ class UsageService:
         result = await self.session.execute(select(UsagePeriod).where(UsagePeriod.id == period_id).with_for_update())
         return result.scalar_one()
 
+    async def _lock_or_create_wallet(self, user_id: uuid.UUID) -> UserWallet:
+        """HYP-66. Mirrors api/app/usage/service.py's _lock_or_create_wallet (the
+        wallet is credited there, from the Stripe webhook, and drawn down here)."""
+        wallet = (
+            await self.session.execute(
+                select(UserWallet).where(UserWallet.user_id == user_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if wallet is not None:
+            return wallet
+        wallet = UserWallet(user_id=user_id, balance_tokens=0)
+        self.session.add(wallet)
+        try:
+            async with self.session.begin_nested():
+                await self.session.flush()
+        except IntegrityError:
+            wallet = (
+                await self.session.execute(
+                    select(UserWallet).where(UserWallet.user_id == user_id).with_for_update()
+                )
+            ).scalar_one()
+        return wallet
+
+    async def _refund_wallet(self, user_id: uuid.UUID, tokens: int) -> list[Any]:
+        wallet = await self._lock_or_create_wallet(user_id)
+        wallet.balance_tokens += tokens
+        transaction = WalletTransaction(user_id=user_id, delta_tokens=tokens, kind="refund")
+        return [wallet, transaction]
+
     async def _stripe_allowance(self, active_subscription: UserSubscription | None) -> int:
         if active_subscription is not None and active_subscription.plan_id is not None:
             plan = await self.session.get(BillingPlan, active_subscription.plan_id)
@@ -372,15 +460,21 @@ class UsageService:
         return int(result.scalar_one())
 
     async def _period_used_tokens(self, usage_period_id: uuid.UUID) -> int:
+        # HYP-66: excludes wallet_reserved_tokens -- that slice is funded by
+        # UserWallet.balance_tokens, not the period allowance. Mirrors
+        # api/app/usage/service.py's _period_allowance_tokens_expr.
         now = utcnow()
         counted_tokens = case(
-            (InferenceUsageEvent.status == "settled", InferenceUsageEvent.charged_tokens),
+            (
+                InferenceUsageEvent.status == "settled",
+                InferenceUsageEvent.charged_tokens - InferenceUsageEvent.wallet_reserved_tokens,
+            ),
             (
                 and_(
                     InferenceUsageEvent.status == "reserved",
                     InferenceUsageEvent.expires_at > now,
                 ),
-                InferenceUsageEvent.reserved_tokens,
+                InferenceUsageEvent.reserved_tokens - InferenceUsageEvent.wallet_reserved_tokens,
             ),
             else_=0,
         )

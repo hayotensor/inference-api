@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,6 +12,67 @@ from app.db.models.billing_plan import BillingPlan
 
 # Annual prices are billed as 10x the monthly price (two months free).
 ANNUAL_MONTHS_BILLED = 10
+
+# HYP-22: a plan whose slug/name reads as a test fixture, or whose Stripe price ID
+# is an obvious placeholder that was never actually created in Stripe, must never
+# be treated as a real, sellable plan -- no matter what its `active`/`visible`
+# columns say. This is intentionally cheap/heuristic and is meant as defense in
+# depth on top of (not instead of) the active+visible filter: it protects against
+# a leftover DB row (e.g. one created by an e2e test suite pointed at the wrong
+# database through the admin API) that already has active=True, visible=True set
+# directly, which the active/visible filter alone cannot catch.
+_TEST_PLAN_NAME_PATTERN = re.compile(r"(?i)\be2e\b|\btest\b")
+_FAKE_STRIPE_PRICE_PREFIX = "price_fake"
+
+
+def looks_like_test_plan(
+    *,
+    slug: str | None,
+    name: str | None,
+    stripe_price_id: str | None = None,
+    stripe_annual_price_id: str | None = None,
+) -> bool:
+    for value in (slug, name):
+        if value and _TEST_PLAN_NAME_PATTERN.search(value):
+            return True
+    for price_id in (stripe_price_id, stripe_annual_price_id):
+        if price_id and price_id.strip().lower().startswith(_FAKE_STRIPE_PRICE_PREFIX):
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class WalletTopupBundle:
+    id: str
+    usd_cents: int
+    tokens: int
+
+
+# HYP-66 pay-as-you-go bundles. One-time Stripe Checkout purchases (mode="payment")
+# that credit UserWallet.balance_tokens; spent only after the subscription
+# allowance for the period is exhausted (see app/usage/service.py).
+#
+# Priced around the Starter plan's implied rate (900 cents / 1,000,000 tokens =
+# $9/1M) since a wallet top-up carries none of a subscription's commitment: the
+# smallest bundle is a slight premium over that rate, and the discount shrinks
+# back toward (but never below) $9/1M as the bundle gets bigger. None of these
+# undercut Pro's $4.90/1M or Business's $2.99/1M bulk subscription rate, so
+# heavy, predictable usage still has a real incentive to subscribe instead of
+# only ever topping up the wallet.
+#   $10  -> 1,000,000 tokens   ($10.00 / 1M, ~11% premium over Starter)
+#   $25  -> 2,600,000 tokens   ($9.62 / 1M,  ~7% premium)
+#   $50  -> 5,400,000 tokens   ($9.26 / 1M,  ~3% premium)
+#   $100 -> 11,200,000 tokens  ($8.93 / 1M,  at/just below Starter's rate)
+WALLET_TOPUP_BUNDLES: tuple[WalletTopupBundle, ...] = (
+    WalletTopupBundle(id="topup_10", usd_cents=1_000, tokens=1_000_000),
+    WalletTopupBundle(id="topup_25", usd_cents=2_500, tokens=2_600_000),
+    WalletTopupBundle(id="topup_50", usd_cents=5_000, tokens=5_400_000),
+    WalletTopupBundle(id="topup_100", usd_cents=10_000, tokens=11_200_000),
+)
+
+
+def wallet_topup_bundle(bundle_id: str) -> WalletTopupBundle | None:
+    return next((bundle for bundle in WALLET_TOPUP_BUNDLES if bundle.id == bundle_id), None)
 
 
 @dataclass(frozen=True)

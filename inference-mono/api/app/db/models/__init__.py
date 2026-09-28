@@ -24,7 +24,9 @@ from app.db.models.usage_period import UsagePeriod
 from app.db.models.user import User
 from app.db.models.user_billing_account import UserBillingAccount
 from app.db.models.user_subscription import UserSubscription
+from app.db.models.user_wallet import UserWallet
 from app.db.models.wallet_nonce import WalletNonce
+from app.db.models.wallet_transaction import WalletTransaction
 
 __all__ = [
     "APIKey",
@@ -60,5 +62,7 @@ __all__ = [
     "User",
     "UserBillingAccount",
     "UserSubscription",
+    "UserWallet",
     "WalletNonce",
+    "WalletTransaction",
 ]

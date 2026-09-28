@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_log
 from app.auth.dependencies import current_active_user
+from app.billing.plans import WALLET_TOPUP_BUNDLES
 from app.billing.schemas import (
     BillingPlanRead,
     BillingSubscriptionRead,
@@ -14,6 +15,9 @@ from app.billing.schemas import (
     StripeSessionResponse,
     StripeWebhookResponse,
     SyncCheckoutSessionRequest,
+    WalletBalanceRead,
+    WalletCheckoutSessionRequest,
+    WalletTopupBundleRead,
 )
 from app.billing.service import BillingService
 from app.core.errors import bad_request
@@ -108,6 +112,48 @@ async def stripe_webhook(
     processed = await BillingService(session).process_webhook(payload, stripe_signature)
     await session.commit()
     return StripeWebhookResponse(received=True, processed=processed)
+
+
+@router.get("/wallet/bundles", response_model=list[WalletTopupBundleRead])
+@limiter.limit("60/minute")
+async def list_wallet_topup_bundles(request: Request) -> list[WalletTopupBundleRead]:
+    return [
+        WalletTopupBundleRead(id=bundle.id, usd_cents=bundle.usd_cents, tokens=bundle.tokens)
+        for bundle in WALLET_TOPUP_BUNDLES
+    ]
+
+
+@router.get("/wallet", response_model=WalletBalanceRead)
+@limiter.limit("60/minute")
+async def get_wallet_balance(
+    request: Request,
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user),
+) -> WalletBalanceRead:
+    balance = await BillingService(session).get_wallet_balance(user)
+    return WalletBalanceRead(balance_tokens=balance)
+
+
+@router.post("/wallet/checkout-session", response_model=StripeSessionResponse)
+@limiter.limit("10/minute")
+async def create_wallet_checkout_session(
+    request: Request,
+    payload: WalletCheckoutSessionRequest,
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user),
+) -> StripeSessionResponse:
+    stripe_session = await BillingService(session).create_wallet_checkout_session(
+        user, payload.bundle_id
+    )
+    await write_audit_log(
+        session,
+        "billing.wallet_checkout_session",
+        user_id=user.id,
+        request=request,
+        metadata={"bundle_id": payload.bundle_id, "session_id": stripe_session["id"]},
+    )
+    await session.commit()
+    return StripeSessionResponse.model_validate(stripe_session)
 
 
 @router.get("/subscription", response_model=BillingSubscriptionRead)

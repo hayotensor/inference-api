@@ -102,6 +102,17 @@ export interface BillingPlan {
   features: Record<string, unknown>;
 }
 
+export interface WalletTopupBundle {
+  id: string;
+  usd_cents: number;
+  tokens: number;
+  currency: string;
+}
+
+export interface WalletBalance {
+  balance_tokens: number;
+}
+
 export interface StripeSessionResponse {
   id?: string;
   url?: string;

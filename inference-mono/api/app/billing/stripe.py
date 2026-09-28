@@ -67,6 +67,51 @@ class StripeClient:
             subscription_data={"metadata": {"user_id": user_id, "plan_id": plan_id}},
         )
 
+    def create_wallet_checkout_session(
+        self,
+        *,
+        customer_id: str,
+        user_id: str,
+        bundle_id: str,
+        usd_cents: int,
+        tokens: int,
+        currency: str = "usd",
+    ) -> dict[str, Any]:
+        """One-time (mode="payment") Checkout Session for a pay-as-you-go wallet
+        top-up (HYP-66). Uses inline `price_data` instead of a pre-created Stripe
+        Price -- unlike the subscription plans, these bundles are not meant to be
+        provisioned as standing Stripe catalog objects, so nothing needs to be
+        seeded in Stripe before this can run."""
+        stripe = self._stripe()
+        metadata = {
+            "purpose": "wallet_topup",
+            "user_id": user_id,
+            "bundle_id": bundle_id,
+            "tokens": str(tokens),
+        }
+        return stripe.checkout.Session.create(
+            mode="payment",
+            customer=customer_id,
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": currency,
+                        "unit_amount": usd_cents,
+                        "product_data": {
+                            "name": f"Talaris wallet top-up — {tokens:,} tokens",
+                            "metadata": metadata,
+                        },
+                    },
+                    "quantity": 1,
+                }
+            ],
+            success_url=_with_checkout_session_placeholder(str(settings.stripe_success_url)),
+            cancel_url=str(settings.stripe_cancel_url),
+            client_reference_id=user_id,
+            metadata=metadata,
+            payment_intent_data={"metadata": metadata},
+        )
+
     def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]:
         stripe = self._stripe()
         return stripe.checkout.Session.retrieve(session_id)

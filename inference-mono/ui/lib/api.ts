@@ -36,7 +36,9 @@ import type {
   UsageByModelResponse,
   UsageHistoryResponse,
   UsagePeriod,
-  User
+  User,
+  WalletBalance,
+  WalletTopupBundle
 } from "@/lib/types";
 
 export const API_BASE_URL =
@@ -515,6 +517,20 @@ export const billingApi = {
       method: "POST",
       auth: true,
       body: { cancel_at_period_end: cancelAtPeriodEnd }
+    });
+  },
+  // HYP-66: pay-as-you-go wallet top-ups.
+  walletBundles(options: ApiCallOptions = {}) {
+    return apiRequest<WalletTopupBundle[]>("/billing/wallet/bundles", { signal: options.signal });
+  },
+  walletBalance(options: ApiCallOptions = {}) {
+    return apiRequest<WalletBalance>("/billing/wallet", { auth: true, signal: options.signal });
+  },
+  walletCheckout(bundleId: string) {
+    return apiRequest<StripeSessionResponse>("/billing/wallet/checkout-session", {
+      method: "POST",
+      auth: true,
+      body: { bundle_id: bundleId }
     });
   }
 };

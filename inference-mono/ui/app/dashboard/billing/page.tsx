@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeftRight, CreditCard, ExternalLink, Loader2, RefreshCw, XCircle } from "lucide-react";
+import { ArrowLeftRight, CreditCard, ExternalLink, Loader2, RefreshCw, Wallet, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { BillingIntervalToggle } from "@/components/billing-interval-toggle";
@@ -51,6 +51,14 @@ export default function BillingPage() {
     queryKey: ["billing-plans"],
     queryFn: billingApi.plans
   });
+  const walletBalanceQuery = useQuery({
+    queryKey: ["wallet-balance"],
+    queryFn: billingApi.walletBalance
+  });
+  const walletBundlesQuery = useQuery({
+    queryKey: ["wallet-bundles"],
+    queryFn: billingApi.walletBundles
+  });
 
   const portalMutation = useMutation({
     mutationFn: billingApi.portal,
@@ -79,6 +87,11 @@ export default function BillingPage() {
       toast.success("Cancellation scheduled");
       await queryClient.invalidateQueries({ queryKey: ["billing-subscription"] });
     },
+    onError: (error) => toast.error(apiErrorMessage(error))
+  });
+  const walletCheckoutMutation = useMutation({
+    mutationFn: (bundleId: string) => billingApi.walletCheckout(bundleId),
+    onSuccess: redirectToStripeSession,
     onError: (error) => toast.error(apiErrorMessage(error))
   });
 
@@ -186,7 +199,8 @@ export default function BillingPage() {
                 <CardDescription>
                   {hasActiveSubscription
                     ? "Switching plans updates the subscription in place; Stripe prorates the difference."
-                    : "Choosing a paid plan opens Stripe Checkout."}
+                    : "Choosing a paid plan opens Stripe Checkout."}{" "}
+                  Credits are spent per request at each model&apos;s rate, not 1 token for 1 credit.
                 </CardDescription>
               </div>
               {annualAvailable ? (
@@ -206,7 +220,7 @@ export default function BillingPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Plan</TableHead>
-                    <TableHead>Allowance</TableHead>
+                    <TableHead>Credits / mo</TableHead>
                     <TableHead>Price</TableHead>
                     <TableHead className="text-right">Action</TableHead>
                   </TableRow>
@@ -288,6 +302,59 @@ export default function BillingPage() {
                   })}
                 </TableBody>
               </Table>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Wallet</CardTitle>
+            <CardDescription>
+              Pay-as-you-go credits. Once the plan&apos;s allowance for the period runs
+              out, usage draws from this balance instead of being blocked.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {walletBalanceQuery.isLoading ? <LoadingState /> : null}
+            {walletBalanceQuery.isError ? <ErrorState error={walletBalanceQuery.error} /> : null}
+            {walletBalanceQuery.data ? (
+              <div className="space-y-4 text-sm">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-muted-foreground">Balance</span>
+                  <span className="text-2xl font-semibold tracking-normal">
+                    {formatNumber(walletBalanceQuery.data.balance_tokens)}
+                    <span className="text-sm font-normal text-muted-foreground"> tokens</span>
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  <span className="text-muted-foreground">Top up</span>
+                  {walletBundlesQuery.isLoading ? <LoadingState /> : null}
+                  {walletBundlesQuery.isError ? <ErrorState error={walletBundlesQuery.error} /> : null}
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {(walletBundlesQuery.data ?? []).map((bundle) => {
+                      const isThisBundlePending =
+                        walletCheckoutMutation.isPending &&
+                        walletCheckoutMutation.variables === bundle.id;
+                      return (
+                        <Button
+                          key={bundle.id}
+                          variant="outline"
+                          onClick={() => walletCheckoutMutation.mutate(bundle.id)}
+                          disabled={walletCheckoutMutation.isPending}
+                        >
+                          {isThisBundlePending ? (
+                            <Loader2 className="animate-spin" />
+                          ) : (
+                            <Wallet />
+                          )}
+                          {formatMoney(bundle.usd_cents, bundle.currency)} for{" "}
+                          {formatNumber(bundle.tokens)}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
             ) : null}
           </CardContent>
         </Card>

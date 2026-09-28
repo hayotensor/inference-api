@@ -4,8 +4,10 @@ import calendar
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_CEILING, Decimal
+from typing import Any
 
 from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing.plans import seed_default_billing_plans
@@ -20,6 +22,8 @@ from app.db.models.manual_token_adjustment import ManualTokenAdjustment
 from app.db.models.usage_period import UsagePeriod
 from app.db.models.user import User
 from app.db.models.user_subscription import UserSubscription
+from app.db.models.user_wallet import UserWallet
+from app.db.models.wallet_transaction import WalletTransaction
 from app.usage.pricing import ModelPricingService
 
 ACTIVE_SUBSCRIPTION_STATUSES = {"active", "trialing"}
@@ -129,10 +133,20 @@ class UsageService:
         )
         return list(result.scalars())
 
-    async def usage_by_model(self, user: User) -> list[dict]:
+    async def usage_by_model(
+        self, user: User, *, limit: int = 50, offset: int = 0
+    ) -> tuple[list[dict], int]:
         """Per-model totals across all of the user's usage events (not period-scoped,
-        mirroring usage_history), for the per-model usage table."""
+        mirroring usage_history), for the per-model usage table. Returns
+        (rows for the requested page, total number of distinct models)."""
         counted_tokens = self._counted_tokens_expr()
+        grouped = (
+            select(InferenceUsageEvent.model)
+            .where(InferenceUsageEvent.user_id == user.id)
+            .group_by(InferenceUsageEvent.model)
+        )
+        total = await self._count(grouped)
+
         result = await self.session.execute(
             select(
                 InferenceUsageEvent.model,
@@ -144,9 +158,11 @@ class UsageService:
             )
             .where(InferenceUsageEvent.user_id == user.id)
             .group_by(InferenceUsageEvent.model)
-            .order_by(func.coalesce(func.sum(counted_tokens), 0).desc())
+            .order_by(func.coalesce(func.sum(counted_tokens), 0).desc(), InferenceUsageEvent.model.asc())
+            .limit(limit)
+            .offset(offset)
         )
-        return [
+        rows = [
             {
                 "model": model,
                 "request_count": request_count,
@@ -164,12 +180,14 @@ class UsageService:
                 last_used_at,
             ) in result.all()
         ]
+        return rows, total
 
     async def usage_by_model_detail(
-        self, user: User, model: str, *, limit: int = 100
+        self, user: User, model: str, *, limit: int = 100, offset: int = 0
     ) -> tuple[dict, list[InferenceUsageEvent]] | None:
-        """Totals plus the most recent events for a single model. Returns None if
-        the user has no usage events for that model at all."""
+        """Totals plus a page of the most recent events for a single model. Returns
+        None if the user has no usage events for that model at all. The summary
+        always reflects the model's full totals, independent of the events page."""
         counted_tokens = self._counted_tokens_expr()
         summary_result = await self.session.execute(
             select(
@@ -196,6 +214,7 @@ class UsageService:
             )
             .order_by(InferenceUsageEvent.created_at.desc())
             .limit(limit)
+            .offset(offset)
         )
         summary = {
             "model": model,
@@ -205,12 +224,22 @@ class UsageService:
             "charged_tokens": charged_tokens,
             "last_used_at": last_used_at,
         }
+        # request_count is already the total matching-row count for this model
+        # (unaffected by the events page's limit/offset), so it doubles as total_events.
         return summary, list(events_result.scalars())
+
+    async def _count(self, statement) -> int:
+        count_statement = select(func.count()).select_from(statement.order_by(None).subquery())
+        return int((await self.session.execute(count_statement)).scalar_one())
 
     @staticmethod
     def _counted_tokens_expr():
-        """Same "what actually counts against the allowance" semantics as
-        _period_used_tokens, reused here per-event instead of per-period."""
+        """Total tokens a live (settled, or still-reserved-and-unexpired) event
+        counts for *usage reporting* -- per-model totals, history, etc. This is
+        funding-source-agnostic: it includes whatever HYP-66 drew from the wallet
+        as well as the period allowance, because both are real usage. Contrast
+        with `_period_allowance_tokens_expr`, which only the period's own
+        used_tokens/remaining_tokens bookkeeping should use."""
         now = utcnow()
         return case(
             (InferenceUsageEvent.status == "settled", InferenceUsageEvent.charged_tokens),
@@ -220,6 +249,28 @@ class UsageService:
                     InferenceUsageEvent.expires_at > now,
                 ),
                 InferenceUsageEvent.reserved_tokens,
+            ),
+            else_=0,
+        )
+
+    @staticmethod
+    def _period_allowance_tokens_expr():
+        """The allowance-funded slice of `_counted_tokens_expr` -- excludes
+        whatever HYP-66 drew from the wallet instead. This is what
+        UsagePeriod.used_tokens/remaining_tokens must reconcile to; the wallet
+        side of the split lives on UserWallet.balance_tokens instead."""
+        now = utcnow()
+        return case(
+            (
+                InferenceUsageEvent.status == "settled",
+                InferenceUsageEvent.charged_tokens - InferenceUsageEvent.wallet_reserved_tokens,
+            ),
+            (
+                and_(
+                    InferenceUsageEvent.status == "reserved",
+                    InferenceUsageEvent.expires_at > now,
+                ),
+                InferenceUsageEvent.reserved_tokens - InferenceUsageEvent.wallet_reserved_tokens,
             ),
             else_=0,
         )
@@ -236,11 +287,15 @@ class UsageService:
         expired = 0
         for event in result.scalars():
             period = await self._lock_period(event.usage_period_id)
-            period.used_tokens = max(0, period.used_tokens - event.reserved_tokens)
+            period_portion = event.reserved_tokens - event.wallet_reserved_tokens
+            period.used_tokens = max(0, period.used_tokens - period_portion)
             period.remaining_tokens = max(0, period.total_allowance - period.used_tokens)
+            to_add = [period, event]
+            if event.wallet_reserved_tokens:
+                to_add.extend(await self._refund_wallet(event.user_id, event.wallet_reserved_tokens))
             event.status = "expired"
             event.released_at = now
-            self.session.add_all([period, event])
+            self.session.add_all(to_add)
             expired += 1
         if expired:
             await self.session.flush()
@@ -286,8 +341,17 @@ class UsageService:
         multiplier = await ModelPricingService(self.session).multiplier_for_model(model)
         estimated_raw_tokens = prompt_tokens + max_completion_tokens
         reserved_tokens = charged_token_count(estimated_raw_tokens, multiplier)
-        if locked_period.remaining_tokens < reserved_tokens:
-            raise payment_required("Insufficient inference token balance")
+
+        # HYP-66: once the subscription allowance for the period is exhausted,
+        # draw the rest from the pay-as-you-go wallet instead of 402ing outright.
+        # Only the portion beyond the remaining allowance ever touches the wallet.
+        allowance_portion = min(reserved_tokens, locked_period.remaining_tokens)
+        wallet_portion = reserved_tokens - allowance_portion
+        wallet: UserWallet | None = None
+        if wallet_portion > 0:
+            wallet = await self._lock_or_create_wallet(user.id)
+            if wallet.balance_tokens < wallet_portion:
+                raise payment_required("Insufficient inference token balance")
 
         event = InferenceUsageEvent(
             usage_period_id=locked_period.id,
@@ -301,13 +365,22 @@ class UsageService:
             raw_total_tokens=estimated_raw_tokens,
             model_multiplier=multiplier,
             reserved_tokens=reserved_tokens,
+            wallet_reserved_tokens=wallet_portion,
             charged_tokens=0,
             status="reserved",
             expires_at=expires_at or expires_in(seconds=settings.router_reservation_ttl_seconds),
         )
-        locked_period.used_tokens += reserved_tokens
+        locked_period.used_tokens += allowance_portion
         locked_period.remaining_tokens = max(0, locked_period.total_allowance - locked_period.used_tokens)
-        self.session.add_all([locked_period, event])
+        to_add = [locked_period, event]
+        if wallet_portion > 0:
+            assert wallet is not None
+            wallet.balance_tokens -= wallet_portion
+            to_add.append(wallet)
+            to_add.append(
+                WalletTransaction(user_id=user.id, delta_tokens=-wallet_portion, kind="debit")
+            )
+        self.session.add_all(to_add)
         await self.session.flush()
         return event
 
@@ -328,18 +401,47 @@ class UsageService:
         period = await self._lock_period(event.usage_period_id)
         raw_total = prompt_tokens + completion_tokens
         charged_tokens = charged_token_count(raw_total, Decimal(event.model_multiplier))
-        delta = charged_tokens - event.reserved_tokens
-        if delta > 0 and period.remaining_tokens < delta:
+
+        # HYP-66: re-split the final charged_tokens between the period allowance and
+        # the wallet, the same way reserve_inference_tokens did -- but computed
+        # against capacity with this event's *own* reservation released first, so
+        # settling it neither double-counts nor double-debits what it already holds.
+        old_period_portion = event.reserved_tokens - event.wallet_reserved_tokens
+        old_wallet_portion = event.wallet_reserved_tokens
+        available_allowance = period.remaining_tokens + old_period_portion
+        new_period_portion = min(charged_tokens, available_allowance)
+        new_wallet_portion = charged_tokens - new_period_portion
+
+        wallet: UserWallet | None = None
+        if new_wallet_portion > 0 or old_wallet_portion > 0:
+            wallet = await self._lock_or_create_wallet(event.user_id)
+        available_wallet = (wallet.balance_tokens if wallet is not None else 0) + old_wallet_portion
+        if new_wallet_portion > available_wallet:
             raise payment_required("Insufficient inference token balance")
-        period.used_tokens = max(0, period.used_tokens + delta)
+
+        period.used_tokens = max(0, period.used_tokens - old_period_portion + new_period_portion)
         period.remaining_tokens = max(0, period.total_allowance - period.used_tokens)
+        to_add = [period, event]
+        wallet_net_delta = old_wallet_portion - new_wallet_portion
+        if wallet_net_delta != 0:
+            assert wallet is not None
+            wallet.balance_tokens += wallet_net_delta
+            to_add.append(wallet)
+            to_add.append(
+                WalletTransaction(
+                    user_id=event.user_id,
+                    delta_tokens=wallet_net_delta,
+                    kind="refund" if wallet_net_delta > 0 else "debit",
+                )
+            )
         event.prompt_tokens = prompt_tokens
         event.completion_tokens = completion_tokens
         event.raw_total_tokens = raw_total
         event.charged_tokens = charged_tokens
+        event.wallet_reserved_tokens = new_wallet_portion
         event.status = "settled"
         event.settled_at = utcnow()
-        self.session.add_all([period, event])
+        self.session.add_all(to_add)
         await self.session.flush()
         return event
 
@@ -350,11 +452,15 @@ class UsageService:
             await self.expire_stale_reservations(event.user_id)
             return
         period = await self._lock_period(event.usage_period_id)
-        period.used_tokens = max(0, period.used_tokens - event.reserved_tokens)
+        period_portion = event.reserved_tokens - event.wallet_reserved_tokens
+        period.used_tokens = max(0, period.used_tokens - period_portion)
         period.remaining_tokens = max(0, period.total_allowance - period.used_tokens)
+        to_add = [period, event]
+        if event.wallet_reserved_tokens:
+            to_add.extend(await self._refund_wallet(event.user_id, event.wallet_reserved_tokens))
         event.status = "released"
         event.released_at = utcnow()
-        self.session.add_all([period, event])
+        self.session.add_all(to_add)
         await self.session.flush()
 
     async def recalculate_current_period(self, user: User) -> UsagePeriod:
@@ -447,6 +553,38 @@ class UsageService:
         )
         return result.scalar_one()
 
+    async def _lock_or_create_wallet(self, user_id: uuid.UUID) -> UserWallet:
+        """HYP-66. Mirrors app/billing/service.py's _lock_or_create_wallet (the
+        wallet is credited there, from the Stripe webhook, and drawn down here)."""
+        wallet = (
+            await self.session.execute(
+                select(UserWallet).where(UserWallet.user_id == user_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if wallet is not None:
+            return wallet
+        wallet = UserWallet(user_id=user_id, balance_tokens=0)
+        self.session.add(wallet)
+        try:
+            async with self.session.begin_nested():
+                await self.session.flush()
+        except IntegrityError:
+            wallet = (
+                await self.session.execute(
+                    select(UserWallet).where(UserWallet.user_id == user_id).with_for_update()
+                )
+            ).scalar_one()
+        return wallet
+
+    async def _refund_wallet(self, user_id: uuid.UUID, tokens: int) -> list[Any]:
+        """Credits back `tokens` to the wallet (a reservation that never turned into
+        real spend -- released or expired) and returns the [wallet, transaction]
+        pair for the caller to add to the session alongside its own changes."""
+        wallet = await self._lock_or_create_wallet(user_id)
+        wallet.balance_tokens += tokens
+        transaction = WalletTransaction(user_id=user_id, delta_tokens=tokens, kind="refund")
+        return [wallet, transaction]
+
     async def _stripe_allowance(self, active_subscription: UserSubscription | None) -> int:
         if active_subscription is not None and active_subscription.plan_id is not None:
             plan = await self.session.get(BillingPlan, active_subscription.plan_id)
@@ -487,7 +625,7 @@ class UsageService:
 
     async def _period_used_tokens(self, usage_period_id: uuid.UUID) -> int:
         result = await self.session.execute(
-            select(func.coalesce(func.sum(self._counted_tokens_expr()), 0)).where(
+            select(func.coalesce(func.sum(self._period_allowance_tokens_expr()), 0)).where(
                 InferenceUsageEvent.usage_period_id == usage_period_id
             )
         )

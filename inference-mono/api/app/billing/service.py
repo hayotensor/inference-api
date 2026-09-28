@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.billing.plans import seed_default_billing_plans
+from app.billing.plans import looks_like_test_plan, seed_default_billing_plans, wallet_topup_bundle
 from app.billing.stripe import StripeClient
 from app.core.errors import bad_request, forbidden, not_found
 from app.core.security import utcnow
@@ -17,6 +17,8 @@ from app.db.models.stripe_webhook_event import StripeWebhookEvent
 from app.db.models.user import User
 from app.db.models.user_billing_account import UserBillingAccount
 from app.db.models.user_subscription import UserSubscription
+from app.db.models.user_wallet import UserWallet
+from app.db.models.wallet_transaction import WalletTransaction
 
 
 def _obj_get(value: Any, key: str, default: Any = None) -> Any:
@@ -92,12 +94,34 @@ class BillingService:
             .where(BillingPlan.active.is_(True), BillingPlan.visible.is_(True))
             .order_by(BillingPlan.sort_order.asc(), BillingPlan.monthly_token_allowance.asc())
         )
-        return list(result.scalars())
+        # HYP-22: filter out anything that looks like a test/e2e plan regardless of
+        # its active/visible columns -- see looks_like_test_plan for why this check
+        # exists on top of, not instead of, the query filter above.
+        return [
+            plan
+            for plan in result.scalars()
+            if not looks_like_test_plan(
+                slug=plan.slug,
+                name=plan.name,
+                stripe_price_id=plan.stripe_price_id,
+                stripe_annual_price_id=plan.stripe_annual_price_id,
+            )
+        ]
 
     async def _plan_and_price(self, plan_id: uuid.UUID, interval: str) -> tuple[BillingPlan, str]:
         await seed_default_billing_plans(self.session)
         plan = await self.session.get(BillingPlan, plan_id)
-        if plan is None or not plan.active or not plan.visible:
+        if (
+            plan is None
+            or not plan.active
+            or not plan.visible
+            or looks_like_test_plan(
+                slug=plan.slug,
+                name=plan.name,
+                stripe_price_id=plan.stripe_price_id,
+                stripe_annual_price_id=plan.stripe_annual_price_id,
+            )
+        ):
             raise not_found("Billing plan not found")
         if interval not in ("month", "year"):
             raise bad_request("invalid_interval", "Billing interval must be 'month' or 'year'")
@@ -135,6 +159,96 @@ class BillingService:
         self.session.add(account)
         await self.session.flush()
         return {"id": session["id"], "url": session["url"]}
+
+    async def create_wallet_checkout_session(self, user: User, bundle_id: str) -> dict[str, Any]:
+        """HYP-66: a one-time (mode="payment") Checkout Session for a pay-as-you-go
+        wallet top-up. Unlike subscription checkout, this deliberately does not
+        call _reject_if_checkout_pending -- buying more than one bundle, or
+        topping up again before a previous purchase's webhook has landed, is
+        fine; nothing here creates a recurring commitment to dedupe against."""
+        bundle = wallet_topup_bundle(bundle_id)
+        if bundle is None:
+            raise bad_request("unknown_wallet_bundle", "Unknown wallet top-up bundle")
+        account = await self.ensure_billing_account(user)
+        session = self.stripe_client.create_wallet_checkout_session(
+            customer_id=account.stripe_customer_id or "",
+            user_id=str(user.id),
+            bundle_id=bundle.id,
+            usd_cents=bundle.usd_cents,
+            tokens=bundle.tokens,
+        )
+        return {"id": session["id"], "url": session["url"]}
+
+    async def get_wallet_balance(self, user: User) -> int:
+        wallet = (
+            await self.session.execute(select(UserWallet).where(UserWallet.user_id == user.id))
+        ).scalar_one_or_none()
+        return wallet.balance_tokens if wallet is not None else 0
+
+    async def _credit_wallet_topup(self, checkout_session: Any) -> None:
+        """Applies a completed wallet_topup Checkout Session. Idempotency against a
+        retried webhook delivery is primarily process_webhook's StripeWebhookEvent
+        dedupe (by event id), but the payment_intent id is also checked here so this
+        can never double-credit even if called twice for the same payment."""
+        metadata = _metadata(checkout_session)
+        user_id_value = metadata.get("user_id") or _obj_get(checkout_session, "client_reference_id")
+        tokens_value = metadata.get("tokens")
+        if not user_id_value or not tokens_value:
+            return
+        tokens = int(tokens_value)
+        if tokens <= 0:
+            return
+        user_id = uuid.UUID(str(user_id_value))
+        payment_intent = _obj_get(checkout_session, "payment_intent")
+        payment_intent_id = str(payment_intent) if payment_intent else None
+
+        if payment_intent_id:
+            existing = (
+                await self.session.execute(
+                    select(WalletTransaction).where(
+                        WalletTransaction.stripe_payment_intent_id == payment_intent_id,
+                        WalletTransaction.kind == "purchase",
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                return
+
+        wallet = await self._lock_or_create_wallet(user_id)
+        wallet.balance_tokens += tokens
+        self.session.add(wallet)
+        self.session.add(
+            WalletTransaction(
+                user_id=user_id,
+                delta_tokens=tokens,
+                kind="purchase",
+                stripe_payment_intent_id=payment_intent_id,
+            )
+        )
+        await self.session.flush()
+
+    async def _lock_or_create_wallet(self, user_id: uuid.UUID) -> UserWallet:
+        wallet = (
+            await self.session.execute(
+                select(UserWallet).where(UserWallet.user_id == user_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if wallet is not None:
+            return wallet
+        wallet = UserWallet(user_id=user_id, balance_tokens=0)
+        self.session.add(wallet)
+        try:
+            async with self.session.begin_nested():
+                await self.session.flush()
+        except IntegrityError:
+            # Same race as sync_subscription_object's insert: a concurrent request
+            # for the same user created the row first.
+            wallet = (
+                await self.session.execute(
+                    select(UserWallet).where(UserWallet.user_id == user_id).with_for_update()
+                )
+            ).scalar_one()
+        return wallet
 
     async def _reject_if_checkout_pending(self, account: UserBillingAccount) -> None:
         """A Checkout Session already open for this account blocks a new one.
@@ -318,7 +432,13 @@ class BillingService:
         data = _obj_get(event, "data", {}) or {}
         stripe_object = _obj_get(data, "object", {}) or {}
         if event_type == "checkout.session.completed":
-            await self.sync_checkout_session(stripe_object)
+            # HYP-66: a wallet top-up is a one-time payment, not a subscription --
+            # it must never fall into sync_checkout_session, which expects (and
+            # looks for) a `subscription` object on the session.
+            if _metadata(stripe_object).get("purpose") == "wallet_topup":
+                await self._credit_wallet_topup(stripe_object)
+            else:
+                await self.sync_checkout_session(stripe_object)
         elif event_type in {
             "customer.subscription.created",
             "customer.subscription.updated",
