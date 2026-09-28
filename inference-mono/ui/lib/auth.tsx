@@ -31,11 +31,23 @@ const CHAT_URL = process.env.NEXT_PUBLIC_CHAT_URL || "/chat";
  * door bouncing an unauthenticated caller here, so it is attacker-influenced: any
  * other absolute URL, or a protocol-relative "//host", would make this an open
  * redirect. Exactly one off-origin destination is permitted — the chat URL this
- * build is configured with.
+ * build is configured with, path/query and all (e.g. `${CHAT_URL}?q=...&submit=false`
+ * from `buildChatPromptUrl`), not just an exact string match against the bare
+ * `CHAT_URL` value.
  */
 export function safeNextPath(raw: string | null | undefined, fallback = "/dashboard"): string {
   if (!raw) return fallback;
-  if (raw === CHAT_URL) return raw;
+  try {
+    // Both sides must be absolute for `new URL` to succeed without a base. If
+    // CHAT_URL is itself a same-origin relative path (the default, "/chat"),
+    // this throws and we fall through to the relative-path check below, which
+    // already allows it.
+    const nextOrigin = new URL(raw).origin;
+    const chatOrigin = new URL(CHAT_URL).origin;
+    if (nextOrigin === chatOrigin) return raw;
+  } catch {
+    // `raw` isn't an absolute URL, or CHAT_URL isn't one to compare against.
+  }
   if (!raw.startsWith("/") || raw.startsWith("//")) return fallback;
   return raw;
 }
