@@ -20,6 +20,7 @@ import { AppLogo } from "@/components/app-logo";
 import { ErrorState, LoadingState } from "@/components/data-state";
 import { LogoutConfirmDialog } from "@/components/logout-confirm-dialog";
 import { PageLoadingState } from "@/components/loading-spinner";
+import { SiteFooter } from "@/components/site-footer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { adminApi, ApiError } from "@/lib/api";
@@ -232,6 +233,7 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
         <main className="page-shell py-8 lg:py-12">
           {isPending ? <PageLoadingState /> : children}
         </main>
+        <SiteFooter />
       </div>
       <LogoutConfirmDialog
         open={logoutConfirmOpen}

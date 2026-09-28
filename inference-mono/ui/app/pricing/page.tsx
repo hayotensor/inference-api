@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { BillingIntervalToggle } from "@/components/billing-interval-toggle";
 import { ErrorState, LoadingState } from "@/components/data-state";
 import { PublicNav } from "@/components/public-nav";
+import { SiteFooter } from "@/components/site-footer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -104,6 +105,7 @@ export default function PricingPage() {
           Prices are billed in USD by Stripe. Annual plans are billed once for the year.
         </p>
       </main>
+      <SiteFooter />
     </div>
   );
 }

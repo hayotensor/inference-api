@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { AppLogo } from "@/components/app-logo";
 import { ThemeToggle } from "@/components/public-nav";
+import { SiteFooter } from "@/components/site-footer";
 import {
   Card,
   CardContent,
@@ -22,8 +23,8 @@ export function AuthFormShell({
   footer?: React.ReactNode;
 }) {
   return (
-    <main className="min-h-dvh bg-background">
-      <div className="page-shell flex min-h-dvh flex-col items-center justify-center py-10">
+    <main className="flex min-h-dvh flex-col bg-background">
+      <div className="page-shell flex flex-1 flex-col items-center justify-center py-10">
         <div className="mb-10 flex w-full max-w-md items-center justify-between">
           <AppLogo />
           <ThemeToggle />
@@ -48,6 +49,7 @@ export function AuthFormShell({
           </Link>
         )}
       </div>
+      <SiteFooter />
     </main>
   );
 }

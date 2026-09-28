@@ -6,6 +6,7 @@ import { Activity, CircleCheck, CircleSlash, TriangleAlert } from "lucide-react"
 
 import { ErrorState, LoadingState } from "@/components/data-state";
 import { PublicNav } from "@/components/public-nav";
+import { SiteFooter } from "@/components/site-footer";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/format";
@@ -115,6 +116,7 @@ export default function StatusPage() {
           </>
         ) : null}
       </main>
+      <SiteFooter />
     </div>
   );
 }
