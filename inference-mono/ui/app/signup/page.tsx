@@ -1,10 +1,11 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight, Loader2 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -25,7 +26,20 @@ const signupSchema = z.object({
 type SignupForm = z.infer<typeof signupSchema>;
 
 export default function SignupPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <SignupPageContent />
+    </React.Suspense>
+  );
+}
+
+function SignupPageContent() {
   const router = useRouter();
+  // HYP-65: `?ref=<code>` on a shared referral link (talaris-inference.../signup?ref=...).
+  // Read once on load and threaded through to the register call unchanged --
+  // an unknown/invalid code is never an error, it just means no attribution.
+  const searchParams = useSearchParams();
+  const referralCode = searchParams.get("ref")?.trim() || undefined;
   const form = useForm<SignupForm>({
     resolver: zodResolver(signupSchema),
     defaultValues: { full_name: "", email: "", password: "" }
@@ -59,7 +73,8 @@ export default function SignupPage() {
           onSubmit={form.handleSubmit((values) =>
             mutation.mutate({
               ...values,
-              full_name: values.full_name || null
+              full_name: values.full_name || null,
+              referral_code: referralCode
             })
           )}
         >

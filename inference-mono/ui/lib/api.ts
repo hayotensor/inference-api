@@ -29,6 +29,7 @@ import type {
   EvmWallet,
   GuestInferenceResponse,
   MessageResponse,
+  ReferralSummary,
   StripeSessionResponse,
   TokenResponse,
   UsageAllowance,
@@ -292,6 +293,11 @@ export const authApi = {
     email: string;
     password: string;
     full_name?: string | null;
+    // HYP-65: the `?ref=` code from a shared referral link, if the signup
+    // page was opened with one. Omitted (not sent as null) when there is
+    // none, since the backend's RegisterRequest schema treats "absent" and
+    // "null" the same way -- either skips attribution.
+    referral_code?: string;
   }) {
     return apiRequest<User>("/auth/register", { method: "POST", body: payload });
   },
@@ -531,6 +537,16 @@ export const billingApi = {
       method: "POST",
       auth: true,
       body: { bundle_id: bundleId }
+    });
+  }
+};
+
+// HYP-65: referral system.
+export const referralsApi = {
+  me(options: ApiCallOptions = {}) {
+    return apiRequest<ReferralSummary>("/referrals/me", {
+      auth: true,
+      signal: options.signal
     });
   }
 };

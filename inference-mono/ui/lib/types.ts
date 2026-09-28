@@ -114,6 +114,21 @@ export interface WalletBalance {
   balance_tokens: number;
 }
 
+export interface ReferralEarning {
+  id: UUID;
+  tokens_credited: number;
+  usd_equivalent_cents: number;
+  created_at: string;
+}
+
+export interface ReferralSummary {
+  referral_code: string;
+  referral_link: string;
+  total_referrals: number;
+  total_tokens_earned: number;
+  recent_earnings: ReferralEarning[];
+}
+
 export interface StripeSessionResponse {
   id?: string;
   url?: string;

@@ -8,6 +8,7 @@ import {
   BarChart3,
   CreditCard,
   ExternalLink,
+  Gift,
   KeyRound,
   LayoutDashboard,
   LogOut,
@@ -121,6 +122,7 @@ const navItems: NavItem[] = [
   { href: "/dashboard/api-keys", label: "API keys", icon: KeyRound },
   { href: "/dashboard/usage", label: "Usage", icon: BarChart3 },
   { href: "/dashboard/billing", label: "Billing", icon: CreditCard },
+  { href: "/dashboard/referrals", label: "Referrals", icon: Gift },
   { href: "/dashboard/settings", label: "Settings", icon: Settings }
 ];
 
