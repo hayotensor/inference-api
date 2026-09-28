@@ -29,6 +29,30 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = []
     allowed_hosts: Annotated[list[str], NoDecode] = ["localhost", "127.0.0.1", "testserver"]
     request_id_header: str = "X-Request-ID"
+    # IPs/CIDRs of reverse-proxy hops this plane trusts to set X-Forwarded-For.
+    # Empty by default (fail closed to the raw socket peer) -- mirrors
+    # app/core/rate_limit.py's ``trusted_proxy_ips`` on the control plane. Only
+    # consumer today is inference_api.client_ip.resolve_client_ip (see HYP-67's
+    # guest-inference IP ceiling).
+    trusted_proxy_ips: Annotated[list[str], NoDecode] = []
+
+    # --- Anonymous "sandbox" inference (HYP-67) ---------------------------- #
+    # The homepage's unauthenticated try-it-now box. Off switch kept separate
+    # from ``rate_limit_enabled`` -- this endpoint's two daily ceilings
+    # (guest_limits.check_and_increment_guest_limits) are ALWAYS enforced
+    # whenever the endpoint is enabled, and deliberately FAIL CLOSED on a Redis
+    # error (unlike the rest of this plane's rate limiting, which honors
+    # ``rate_limit_fail_open``) -- this is the platform's first anonymous-facing
+    # compute surface, so a Redis outage must not silently grant free inference.
+    guest_inference_enabled: bool = True
+    # Explicit operator override for the one model anonymous requests are
+    # always forced onto. Unset (default) -> resolved at request time to
+    # whichever ACTIVE model_pricing row has the lowest token_multiplier (see
+    # inference_api.pricing.resolve_guest_model_id).
+    guest_model_id: str | None = None
+    guest_max_tokens: int = Field(default=256, ge=1, le=4096)
+    guest_client_daily_limit: int = Field(default=10, ge=0)
+    guest_ip_daily_limit: int = Field(default=30, ge=0)
 
     router_reservation_ttl_seconds: int = Field(default=900, ge=60, le=86_400)
     router_max_input_tokens: int = Field(default=1_000_000, ge=1)
@@ -181,7 +205,7 @@ class Settings(BaseSettings):
     health_stale_after_seconds: int = Field(default=300, ge=30, le=86_400)
     provisioner_loop_interval_seconds: int = Field(default=60, ge=5, le=3600)
 
-    @field_validator("cors_origins", "allowed_hosts", mode="before")
+    @field_validator("cors_origins", "allowed_hosts", "trusted_proxy_ips", mode="before")
     @classmethod
     def split_lists(cls, value: Any) -> list[str]:
         return _split_csv(value)

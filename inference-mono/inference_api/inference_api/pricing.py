@@ -5,6 +5,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from inference_api.config import settings
 from inference_api.models import ModelPricing
 
 DEFAULT_MODEL_PRICING = {
@@ -46,3 +47,33 @@ class ModelPricingService:
         if pricing is None:
             return Decimal("1")
         return Decimal(pricing.token_multiplier)
+
+
+# The demo model seeded into model_allowlist (inference_api.allowlist_seed) and
+# used pervasively as the default test/dev model -- the only sane fallback if
+# model_pricing somehow has zero active rows (a brand-new, unseeded database).
+_GUEST_MODEL_FALLBACK = "demo-chat-001"
+
+
+async def resolve_guest_model_id(session: AsyncSession) -> str:
+    """The single model anonymous/guest requests (HYP-67) are always forced onto.
+
+    ``settings.guest_model_id`` is an explicit operator override -- set it to
+    pin the sandbox to one model regardless of pricing. Left unset (the
+    default), this resolves to whichever ACTIVE ``model_pricing`` row has the
+    lowest ``token_multiplier`` (ties broken by ``model_name`` for
+    determinism), so the sandbox always serves the platform's cheapest priced
+    model without a second hardcoded constant that could silently drift from
+    the pricing table.
+    """
+    if settings.guest_model_id:
+        return settings.guest_model_id
+    await seed_default_model_pricing(session)
+    result = await session.execute(
+        select(ModelPricing.model_name)
+        .where(ModelPricing.active.is_(True))
+        .order_by(ModelPricing.token_multiplier.asc(), ModelPricing.model_name.asc())
+        .limit(1)
+    )
+    model_name = result.scalar_one_or_none()
+    return model_name or _GUEST_MODEL_FALLBACK
