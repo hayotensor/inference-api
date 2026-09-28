@@ -27,6 +27,10 @@ class BillingPlan(Base):
     annual_price_cents: Mapped[int | None] = mapped_column(Integer)
     currency: Mapped[str] = mapped_column(String(3), default="usd", nullable=False)
     monthly_token_allowance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    # HYP-76: a subscriber on a plan with this set never has their inference
+    # requests capped/402ed by the allowance, and draws nothing from the
+    # HYP-66 pay-as-you-go wallet either. See app/usage/service.py.
+    is_unlimited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True, nullable=False)
     visible: Mapped[bool] = mapped_column(Boolean, default=True, index=True, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

@@ -20,6 +20,7 @@ class BillingPlanRead(BaseModel):
     annual_price_cents: int | None = None
     currency: str = "usd"
     monthly_token_allowance: int
+    is_unlimited: bool = False
     active: bool
     visible: bool
     sort_order: int

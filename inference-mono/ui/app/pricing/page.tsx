@@ -142,7 +142,7 @@ function PlanCard({
           {plan.name === "Pro" ? <Badge>Popular</Badge> : null}
         </div>
         <CardDescription>
-          {formatNumber(plan.monthly_token_allowance)} credits per month
+          {plan.is_unlimited ? "Unlimited credits" : `${formatNumber(plan.monthly_token_allowance)} credits per month`}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -167,7 +167,7 @@ function PlanCard({
         <ul className="space-y-2 text-sm text-muted-foreground">
           <li className="flex gap-2">
             <Check className="mt-0.5 h-4 w-4 shrink-0 text-foreground" strokeWidth={1.5} />
-            {formatNumber(plan.monthly_token_allowance)} credits / month
+            {plan.is_unlimited ? "Unlimited credits" : `${formatNumber(plan.monthly_token_allowance)} credits / month`}
           </li>
           <li className="flex gap-2">
             <Check className="mt-0.5 h-4 w-4 shrink-0 text-foreground" strokeWidth={1.5} />

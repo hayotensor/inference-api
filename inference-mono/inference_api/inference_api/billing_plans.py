@@ -19,6 +19,7 @@ class PlanSeed:
     visible: bool
     sort_order: int
     features: dict[str, Any]
+    is_unlimited: bool = False
 
 
 def default_plan_seeds() -> list[PlanSeed]:
@@ -59,6 +60,21 @@ def default_plan_seeds() -> list[PlanSeed]:
             sort_order=30,
             features={"support": "priority", "included": ["API access", "Usage dashboard"]},
         ),
+        # HYP-76: mirrors ../../api/app/billing/plans.py's "unlimited" seed. This
+        # plane never creates the plan row (the control plane's checkout flow
+        # does, and Stripe pricing is meaningless here) -- this entry exists so
+        # a fresh/test DB seeded from *this* plane's seeder still gets an
+        # is_unlimited=True row to enforce against.
+        PlanSeed(
+            slug="unlimited",
+            name="Unlimited",
+            description="Unlimited inference for the highest, least predictable volume.",
+            monthly_token_allowance=0,
+            visible=True,
+            sort_order=40,
+            features={"support": "priority", "included": ["API access", "Usage dashboard", "Unlimited tokens"]},
+            is_unlimited=True,
+        ),
     ]
 
 
@@ -75,6 +91,7 @@ async def seed_default_billing_plans(session: AsyncSession) -> None:
                     name=seed.name,
                     description=seed.description,
                     monthly_token_allowance=seed.monthly_token_allowance,
+                    is_unlimited=seed.is_unlimited,
                     active=True,
                     visible=seed.visible,
                     sort_order=seed.sort_order,
@@ -82,6 +99,8 @@ async def seed_default_billing_plans(session: AsyncSession) -> None:
                 )
             )
             continue
+        if plan.is_unlimited != seed.is_unlimited:
+            plan.is_unlimited = seed.is_unlimited
         if not plan.slug:
             plan.slug = seed.slug
         if plan.description is None:

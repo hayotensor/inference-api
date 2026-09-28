@@ -122,6 +122,13 @@ class Settings(BaseSettings):
     stripe_starter_annual_price_id: str | None = None
     stripe_pro_annual_price_id: str | None = None
     stripe_business_annual_price_id: str | None = None
+    # HYP-76. Left unset until scripts/stripe_sync_plans.py is run for this new
+    # tier -- app/billing/plans.py's seeder tolerates a None price id here the
+    # same way it does for every other plan (see looks_like_test_plan /
+    # _plan_and_price), so an unseeded Unlimited plan is simply not purchasable
+    # yet rather than crashing anything.
+    stripe_unlimited_price_id: str | None = None
+    stripe_unlimited_annual_price_id: str | None = None
 
     ethereum_rpc_url: str | None = None
     ethereum_erc20_contract_address: str | None = None

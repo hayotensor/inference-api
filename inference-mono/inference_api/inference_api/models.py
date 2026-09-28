@@ -136,6 +136,8 @@ class BillingPlan(Base):
     description: Mapped[str | None] = mapped_column(String(512))
     stripe_price_id: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
     monthly_token_allowance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    # HYP-76: mirrors api/app/db/models/billing_plan.py's column of the same name.
+    is_unlimited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True, nullable=False)
     visible: Mapped[bool] = mapped_column(Boolean, default=True, index=True, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

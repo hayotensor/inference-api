@@ -248,7 +248,9 @@ export default function BillingPage() {
                     return (
                       <TableRow key={plan.id}>
                         <TableCell className="font-medium">{plan.name}</TableCell>
-                        <TableCell>{formatNumber(plan.monthly_token_allowance)}</TableCell>
+                        <TableCell>
+                          {plan.is_unlimited ? "Unlimited" : formatNumber(plan.monthly_token_allowance)}
+                        </TableCell>
                         <TableCell>
                           {isFree || purchasable ? (
                             <span>

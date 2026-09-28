@@ -182,14 +182,21 @@ class UsageService:
 
         # HYP-66: once the subscription allowance for the period is exhausted,
         # draw the rest from the pay-as-you-go wallet instead of 402ing outright.
-        # Mirrors api/app/usage/service.py.
-        allowance_portion = min(reserved_tokens, locked_period.remaining_tokens)
-        wallet_portion = reserved_tokens - allowance_portion
-        wallet: UserWallet | None = None
-        if wallet_portion > 0:
-            wallet = await self._lock_or_create_wallet(user.id)
-            if wallet.balance_tokens < wallet_portion:
-                raise payment_required("Insufficient inference token balance")
+        # HYP-76: an unlimited-plan subscriber skips this entirely -- the whole
+        # reservation counts against the (uncapped, for them) allowance and none
+        # of it ever touches the wallet. Mirrors api/app/usage/service.py.
+        if await self._is_unlimited_subscriber(user.id):
+            allowance_portion = reserved_tokens
+            wallet_portion = 0
+            wallet: UserWallet | None = None
+        else:
+            allowance_portion = min(reserved_tokens, locked_period.remaining_tokens)
+            wallet_portion = reserved_tokens - allowance_portion
+            wallet = None
+            if wallet_portion > 0:
+                wallet = await self._lock_or_create_wallet(user.id)
+                if wallet.balance_tokens < wallet_portion:
+                    raise payment_required("Insufficient inference token balance")
 
         event = InferenceUsageEvent(
             usage_period_id=locked_period.id,
@@ -246,18 +253,26 @@ class UsageService:
         # and the wallet, releasing this event's own reservation first so
         # settling it neither double-counts nor double-debits. Mirrors
         # api/app/usage/service.py.
+        # HYP-76: an unlimited-plan subscriber's reservation never had a wallet
+        # portion, so settling it the same way keeps the whole charge on the
+        # allowance side and never 402s here. Mirrors api/app/usage/service.py.
         old_period_portion = event.reserved_tokens - event.wallet_reserved_tokens
         old_wallet_portion = event.wallet_reserved_tokens
-        available_allowance = period.remaining_tokens + old_period_portion
-        new_period_portion = min(charged_tokens, available_allowance)
-        new_wallet_portion = charged_tokens - new_period_portion
+        if await self._is_unlimited_subscriber(event.user_id):
+            new_period_portion = charged_tokens
+            new_wallet_portion = 0
+            wallet: UserWallet | None = None
+        else:
+            available_allowance = period.remaining_tokens + old_period_portion
+            new_period_portion = min(charged_tokens, available_allowance)
+            new_wallet_portion = charged_tokens - new_period_portion
 
-        wallet: UserWallet | None = None
-        if new_wallet_portion > 0 or old_wallet_portion > 0:
-            wallet = await self._lock_or_create_wallet(event.user_id)
-        available_wallet = (wallet.balance_tokens if wallet is not None else 0) + old_wallet_portion
-        if new_wallet_portion > available_wallet:
-            raise payment_required("Insufficient inference token balance")
+            wallet = None
+            if new_wallet_portion > 0 or old_wallet_portion > 0:
+                wallet = await self._lock_or_create_wallet(event.user_id)
+            available_wallet = (wallet.balance_tokens if wallet is not None else 0) + old_wallet_portion
+            if new_wallet_portion > available_wallet:
+                raise payment_required("Insufficient inference token balance")
 
         period.used_tokens = max(0, period.used_tokens - old_period_portion + new_period_portion)
         period.remaining_tokens = max(0, period.total_allowance - period.used_tokens)
@@ -369,6 +384,14 @@ class UsageService:
             )
         )
         return result.scalar_one_or_none()
+
+    async def _is_unlimited_subscriber(self, user_id: uuid.UUID) -> bool:
+        """HYP-76. Mirrors api/app/usage/service.py."""
+        subscription = await self._active_subscription(user_id)
+        if subscription is None or subscription.plan_id is None:
+            return False
+        plan = await self.session.get(BillingPlan, subscription.plan_id)
+        return bool(plan is not None and plan.active and plan.is_unlimited)
 
     async def _get_or_create_period(
         self, user: User, period_start: datetime, period_end: datetime

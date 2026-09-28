@@ -539,7 +539,8 @@ async def test_plan_ids_are_stable_across_reseeds(client, stripe_prices):
         from sqlalchemy import func, select
 
         count = await session.scalar(select(func.count()).select_from(BillingPlan))
-        assert count == len(first) == 4
+        # free/starter/pro/business/unlimited (HYP-76 added the 5th).
+        assert count == len(first) == 5
         assert uuid.UUID(first["pro"]["id"])
 
 

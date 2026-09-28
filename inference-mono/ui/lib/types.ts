@@ -96,6 +96,7 @@ export interface BillingPlan {
   annual_price_cents: number | null;
   currency: string;
   monthly_token_allowance: number;
+  is_unlimited: boolean;
   active: boolean;
   visible: boolean;
   sort_order: number;

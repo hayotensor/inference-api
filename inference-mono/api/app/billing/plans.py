@@ -89,6 +89,7 @@ class PlanSeed:
     visible: bool
     sort_order: int
     features: dict[str, Any]
+    is_unlimited: bool = False
 
 
 def _stripe_price_id(value: str | None) -> str | None:
@@ -164,6 +165,30 @@ def default_plan_seeds() -> list[PlanSeed]:
             sort_order=30,
             features={"support": "priority", "included": ["API access", "Usage dashboard"]},
         ),
+        # HYP-76: the subscription incentive alongside HYP-66's wallet -- no
+        # allowance ceiling at all, ever (see app/usage/service.py). Priced at
+        # $699/mo, above Business's $299/mo: a heavy/unpredictable-volume
+        # account blowing well past Business's 100M-token allowance would
+        # otherwise either top up the HYP-66 wallet at ~$9/1M (i.e. $699 would
+        # only buy ~78M more tokens that way) or keep 402ing, so a flat fee
+        # sized around "several times Business" is priced to make switching to
+        # Unlimited the obviously better deal once usage gets that heavy,
+        # without pricing it so low that it undercuts Business for everyone.
+        PlanSeed(
+            slug="unlimited",
+            name="Unlimited",
+            description="Unlimited inference for the highest, least predictable volume.",
+            monthly_token_allowance=0,
+            price_cents=69900,
+            stripe_price_id=settings.stripe_unlimited_price_id,
+            annual_price_cents=_annual_cents(69900),
+            stripe_annual_price_id=settings.stripe_unlimited_annual_price_id,
+            currency="usd",
+            visible=True,
+            sort_order=40,
+            features={"support": "priority", "included": ["API access", "Usage dashboard", "Unlimited tokens"]},
+            is_unlimited=True,
+        ),
     ]
 
 
@@ -191,10 +216,16 @@ async def seed_default_billing_plans(session: AsyncSession) -> None:
                     visible=seed.visible,
                     sort_order=seed.sort_order,
                     features=seed.features,
+                    is_unlimited=seed.is_unlimited,
                 )
             )
             continue
 
+        if plan.is_unlimited != seed.is_unlimited:
+            # The catalog is the source of truth for which plan is unlimited; an
+            # admin toggling active/visible on the row must not accidentally
+            # leave a stale is_unlimited value fighting app/usage/service.py.
+            plan.is_unlimited = seed.is_unlimited
         if not plan.slug:
             plan.slug = seed.slug
         if plan.description is None:
