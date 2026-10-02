@@ -487,8 +487,47 @@ export interface ModelStatusEntry {
   registered_miner_count: number;
 }
 
+export interface StatusHistoryDay {
+  day: string; // UTC YYYY-MM-DD
+  status: ModelServiceStatus | null; // worst state seen that day; null = no samples
+  uptime: number | null; // fraction of samples that were operational
+}
+
 export interface StatusResponse {
   generated_at: string;
   overall_status: ModelServiceStatus;
   models: ModelStatusEntry[];
+}
+
+export interface StatusComponent {
+  id: string;
+  name: string;
+  description: string | null;
+  status: ModelServiceStatus;
+  uptime: number | null; // fraction over the history window, null = no data
+  latency_ms: number | null; // mean probe latency (core services only)
+  history: StatusHistoryDay[];
+}
+
+export interface StatusGroup {
+  name: string;
+  components: StatusComponent[];
+}
+
+export interface StatusIncident {
+  id: string;
+  component_id: string;
+  component_name: string;
+  status: ModelServiceStatus; // worst status during the incident
+  started_at: string;
+  resolved_at: string | null; // null = ongoing
+}
+
+// What the Next.js /api/status route returns to the /status page.
+export interface StatusPageResponse {
+  generated_at: string;
+  overall_status: ModelServiceStatus;
+  groups: StatusGroup[];
+  incidents: StatusIncident[];
+  history_days: number;
 }
