@@ -1,11 +1,9 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
-import { ArrowRight, LayoutDashboard, LogOut, Moon, Sun } from "lucide-react";
+import { ArrowRight, LayoutDashboard, Moon, Sun } from "lucide-react";
 
 import { AppLogo } from "@/components/app-logo";
-import { LogoutConfirmDialog } from "@/components/logout-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
@@ -35,8 +33,7 @@ export function ThemeToggle() {
 }
 
 export function PublicNav() {
-  const { isAuthenticated, logout } = useAuth();
-  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const { isAuthenticated } = useAuth();
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-[8px]">
@@ -59,14 +56,6 @@ export function PublicNav() {
                   Dashboard
                 </Link>
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setLogoutConfirmOpen(true)}
-              >
-                <LogOut strokeWidth={1.5} />
-                <span className="sr-only">Log out</span>
-              </Button>
               <ThemeToggle />
             </>
           ) : (
@@ -85,14 +74,6 @@ export function PublicNav() {
           )}
         </div>
       </div>
-      <LogoutConfirmDialog
-        open={logoutConfirmOpen}
-        onOpenChange={setLogoutConfirmOpen}
-        onConfirm={() => {
-          setLogoutConfirmOpen(false);
-          void logout();
-        }}
-      />
     </header>
   );
 }
