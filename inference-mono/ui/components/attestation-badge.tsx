@@ -231,8 +231,7 @@ export function AttestationBadge() {
                     <code className="font-mono text-xs text-foreground">
                       {entry.model_id}
                       {entry.model_version ? `@${entry.model_version}` : ""}
-                    </code>{" "}
-                    : hash <code className="font-mono text-xs text-foreground">{entry.model_hash}</code>
+                    </code>: hash <code className="font-mono text-xs text-foreground">{entry.model_hash}</code>
                     {entry.gpu_hash ? (
                       <>
                         {" "}

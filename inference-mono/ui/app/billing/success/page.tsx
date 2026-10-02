@@ -113,7 +113,7 @@ function BillingSuccessContent() {
             {gaveUpConfirming ? (
               <div className="mt-6 rounded-lg border border-border-strong bg-elevated p-4 text-left text-sm leading-relaxed text-foreground">
                 Stripe hasn&apos;t confirmed this payment with us yet. This can happen if the
-                webhook is delayed — try refreshing in a moment, or check the billing dashboard.
+                webhook is delayed. Try refreshing in a moment, or check the billing dashboard.
                 <Button
                   size="sm"
                   variant="outline"
