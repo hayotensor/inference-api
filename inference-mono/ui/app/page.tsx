@@ -9,7 +9,6 @@ import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { ApiError, apiErrorMessage, guestApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { buildChatPromptUrl } from "@/lib/chat-prompt";
@@ -101,39 +100,54 @@ export default function HomePage() {
 
               <form onSubmit={handlePromptSubmit} className="mt-8 max-w-xl">
                 <Label htmlFor="home-prompt">Ask something</Label>
-                <div className="mt-2 flex flex-col gap-2 rounded-3xl border border-border/70 bg-card/80 p-2 shadow-lg backdrop-blur-sm transition-colors focus-within:border-foreground/40 dark:bg-card/40 sm:flex-row sm:items-end">
-                  <Textarea
+                {/* Mirrors Open-WebUI's MessageInput composer (HYP-68): one
+                    rounded-3xl surface, borderless transparent textarea on top,
+                    and a round arrow-up send button bottom-right (filled when
+                    there is text, muted-and-disabled when empty). Colours are
+                    the same ramp stops the chat app's custom.css maps its gray
+                    scale onto. */}
+                <div className="mt-2 flex w-full flex-col rounded-3xl border border-[#1a1a1d] bg-[rgba(138,138,147,0.05)] px-1 transition hover:border-[#2a2a2f] focus-within:border-[#2a2a2f] [.light_&]:border-[#ede8e7] [.light_&]:bg-[rgba(247,246,244,0.9)] [.light_&]:hover:border-[#d9d6d4] [.light_&]:focus-within:border-[#d9d6d4]">
+                  <textarea
                     id="home-prompt"
                     value={prompt}
                     onChange={(event) => setPrompt(event.target.value)}
                     onKeyDown={handlePromptKeyDown}
                     placeholder={
                       isAuthenticated
-                        ? "Ask anything. Opens in a new chat tab — press Enter there to send."
+                        ? "Ask anything. Opens in a new chat tab. Press Enter there to send."
                         : "Try the free sandbox. A few requests a day, no account needed."
                     }
                     rows={2}
-                    className="min-h-[52px] flex-1 resize-none rounded-2xl border-transparent bg-transparent px-3 py-2.5 shadow-none hover:border-transparent"
+                    className="scrollbar-hidden max-h-80 w-full resize-none bg-transparent px-1 pb-[5px] pt-2.5 text-base text-foreground outline-none placeholder:text-[#686872]"
                   />
-                  <Button
-                    type="submit"
-                    size="lg"
-                    disabled={!prompt.trim() || sandbox.status === "loading"}
-                    className="rounded-2xl sm:shrink-0"
-                  >
-                    {sandbox.status === "loading" ? (
-                      <Loader2 className="animate-spin" strokeWidth={1.5} />
-                    ) : (
-                      <>
-                        Ask
-                        <ArrowRight strokeWidth={1.5} />
-                      </>
-                    )}
-                  </Button>
+                  <div className="mx-0.5 mb-2.5 mt-0.5 flex items-center justify-end px-2.5">
+                    <button
+                      type="submit"
+                      aria-label="Send message"
+                      disabled={!prompt.trim() || sandbox.status === "loading"}
+                      className={
+                        prompt.trim() && sandbox.status !== "loading"
+                          ? "self-center rounded-full bg-[#f7f6f4] p-1.5 text-[#0a0a0b] transition hover:bg-[#ede8e7] [.light_&]:bg-[#0a0a0b] [.light_&]:text-[#f7f6f4] [.light_&]:hover:bg-[#111113]"
+                          : "disabled self-center rounded-full bg-[#35353b] p-1.5 text-[#0a0a0b] transition [.light_&]:bg-[#d9d6d4] [.light_&]:text-[#f7f6f4]"
+                      }
+                    >
+                      {sandbox.status === "loading" ? (
+                        <Loader2 className="size-5 animate-spin" strokeWidth={1.5} />
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="size-5">
+                          <path
+                            fillRule="evenodd"
+                            clipRule="evenodd"
+                            d="M8 14a.75.75 0 0 1-.75-.75V4.56L4.03 7.78a.75.75 0 0 1-1.06-1.06l4.5-4.5a.75.75 0 0 1 1.06 0l4.5 4.5a.75.75 0 0 1-1.06 1.06L8.75 4.56v8.69A.75.75 0 0 1 8 14Z"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                 </div>
                 <p className="metadata mt-2 text-xs">
                   {isAuthenticated
-                    ? "Opens the chat app in a new tab with this prompt ready to send — nothing is sent until you press Enter there."
+                    ? "Opens the chat app in a new tab with this prompt ready to send. Nothing is sent until you press Enter there."
                     : "Free sandbox: a small number of short, capped-model replies per day, right on this page. Sign up for full access."}
                 </p>
 
