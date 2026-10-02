@@ -94,7 +94,17 @@ function ChatButton({
   );
 
   return (
-    <Button variant="outline" size="sm" className={className} asChild>
+    <Button
+      size="sm"
+      // HYP-77: the one high-contrast action in the navbar. Off-white fill with
+      // Void Black text in dark mode (brand ramp, no new colour); light mode
+      // keeps the standard primary fill, since off-white would vanish there.
+      className={cn(
+        "border-transparent bg-[hsl(var(--off-white))] text-[hsl(var(--void-black))] hover:bg-[hsl(var(--off-white)/0.85)] [.light_&]:bg-primary [.light_&]:text-primary-foreground [.light_&]:hover:bg-primary-hover",
+        className
+      )}
+      asChild
+    >
       {/* href/target/rel are progressive enhancement (middle-click, "open link in
           new tab", copy link) -- the primary path always goes through onClick so
           the SSO cookie is guaranteed to be set before the tab is redirected. */}
