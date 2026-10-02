@@ -6,12 +6,13 @@ import { useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight, Loader2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
 import { AuthFormShell } from "@/components/auth-form-shell";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiErrorMessage, authApi } from "@/lib/api";
@@ -20,7 +21,11 @@ import { AuthGate } from "@/lib/auth";
 const signupSchema = z.object({
   full_name: z.string().max(120).optional(),
   email: z.string().email(),
-  password: z.string().min(8, "Password must be at least 8 characters")
+  password: z.string().min(8, "Password must be at least 8 characters"),
+  // HYP-69: affirmative opt-in to the Terms and Privacy Policy (never pre-checked).
+  accept_legal: z.boolean().refine((value) => value === true, {
+    message: "You must accept the Terms and Privacy Policy to create an account"
+  })
 });
 
 type SignupForm = z.infer<typeof signupSchema>;
@@ -42,7 +47,7 @@ function SignupPageContent() {
   const referralCode = searchParams.get("ref")?.trim() || undefined;
   const form = useForm<SignupForm>({
     resolver: zodResolver(signupSchema),
-    defaultValues: { full_name: "", email: "", password: "" }
+    defaultValues: { full_name: "", email: "", password: "", accept_legal: false }
   });
 
   const mutation = useMutation({
@@ -72,7 +77,8 @@ function SignupPageContent() {
           className="space-y-4"
           onSubmit={form.handleSubmit((values) =>
             mutation.mutate({
-              ...values,
+              email: values.email,
+              password: values.password,
               full_name: values.full_name || null,
               referral_code: referralCode
             })
@@ -99,6 +105,38 @@ function SignupPageContent() {
             />
             {form.formState.errors.password ? (
               <p className="text-sm text-destructive">{form.formState.errors.password.message}</p>
+            ) : null}
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-start gap-3">
+              <Controller
+                control={form.control}
+                name="accept_legal"
+                render={({ field }) => (
+                  <Checkbox
+                    id="accept_legal"
+                    className="mt-0.5"
+                    checked={field.value}
+                    onCheckedChange={(checked) => field.onChange(checked === true)}
+                  />
+                )}
+              />
+              <Label htmlFor="accept_legal" className="text-sm font-normal normal-case leading-relaxed tracking-normal text-muted-foreground">
+                I am at least 18 and agree to the{" "}
+                <Link href="/terms" target="_blank" className="text-primary hover:underline">
+                  Terms of Service
+                </Link>{" "}
+                and have read the{" "}
+                <Link href="/privacy" target="_blank" className="text-primary hover:underline">
+                  Privacy Policy
+                </Link>
+                .
+              </Label>
+            </div>
+            {form.formState.errors.accept_legal ? (
+              <p className="text-sm text-destructive">
+                {form.formState.errors.accept_legal.message}
+              </p>
             ) : null}
           </div>
           <Button className="w-full" type="submit" disabled={mutation.isPending}>

@@ -157,6 +157,19 @@ export default function LoginPage() {
           WalletConnect -- then sign a message to prove ownership. No password is created.
         </p>
 
+        <p className="mt-3 text-center text-xs text-muted-foreground">
+          Signing in with Google or a wallet for the first time creates an account, and by
+          continuing you agree to the{" "}
+          <Link href="/terms" className="text-foreground underline underline-offset-4">
+            Terms of Service
+          </Link>{" "}
+          and{" "}
+          <Link href="/privacy" className="text-foreground underline underline-offset-4">
+            Privacy Policy
+          </Link>
+          .
+        </p>
+
         <NoWalletNotice className="mt-3" />
 
         <div className="mt-5 text-center text-sm">

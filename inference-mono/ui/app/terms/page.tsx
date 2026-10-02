@@ -1,113 +1,80 @@
 import type { Metadata } from "next";
 
-import { PublicNav } from "@/components/public-nav";
-import { SiteFooter } from "@/components/site-footer";
+import { LegalPage, type LegalSection } from "@/components/legal-page";
 
 export const metadata: Metadata = {
   title: "Terms of Service"
 };
 
-/**
- * Placeholder Terms of Service (HYP-62). Real, on-topic content rather than
- * lorem ipsum -- accurate to what this product actually is (an API console
- * for metered inference) -- but explicitly a placeholder pending counsel
- * review; swap before this ever needs to be legally binding.
- */
-export default function TermsPage() {
-  return (
-    <div className="min-h-dvh bg-background">
-      <PublicNav />
-      <main className="page-shell max-w-3xl py-12">
-        <p className="eyebrow">Legal</p>
-        <h1 className="mt-2 font-display text-[32px] font-medium leading-10 tracking-display">
-          Terms of Service
-        </h1>
-        <p className="metadata mt-2 text-xs">Last updated September 2026</p>
+const SECTIONS: LegalSection[] = [
+  {
+    title: "Agreement",
+    body: [
+      "These Terms govern access to and use of Talaris's API console, dashboard, chat application, and inference services (the \"Service\"). By creating an account or using the Service you agree to these Terms and acknowledge our Privacy Policy. If you do not agree, do not use the Service."
+    ]
+  },
+  {
+    title: "Eligibility and accounts",
+    body: [
+      "You must be at least 18 years old, or the age of majority in your jurisdiction, and not barred from using the Service under applicable law. You are responsible for keeping your credentials, wallet keys, and API keys confidential and for all activity under your account."
+    ]
+  },
+  {
+    title: "Acceptable use",
+    body: [
+      "You agree not to use the Service to generate or distribute unlawful, infringing, or harmful content, to attempt to circumvent rate limits, quotas, or billing metering, to probe or disrupt the network, or to reverse engineer the underlying infrastructure. We may suspend access for violations."
+    ]
+  },
+  {
+    title: "AI output",
+    body: [
+      "Model output may be inaccurate, incomplete, or offensive and must not be relied on as professional advice. You are responsible for how you use outputs and for your inputs. Inference is performed by independent miners; attestation describes the software they run and is not a guarantee of output accuracy."
+    ]
+  },
+  {
+    title: "Billing and cancellation",
+    body: [
+      "Paid plans are billed in advance through Stripe on a monthly or annual interval; pay-as-you-go top-ups are charged when made. Credit allowances do not roll over unless the plan says so. You may cancel at any time from the billing dashboard and cancellation takes effect at the end of the current period. Consumers in the EU/UK have statutory withdrawal rights, which for digital services begin to be waived once you ask us to start the service and it is delivered. Taxes such as VAT are added where required."
+    ]
+  },
+  {
+    title: "Your content and our rights",
+    body: [
+      "You retain ownership of your inputs and, as between you and us, your outputs. You grant us a limited license to process them solely to operate the Service. We and our licensors retain all rights in the Service itself."
+    ]
+  },
+  {
+    title: "Availability and warranties",
+    body: [
+      "The Service is provided \"as is\" and \"as available\" without warranties of any kind to the extent permitted by law. We do not guarantee uninterrupted or error-free operation. Nothing here limits rights that cannot be excluded under mandatory consumer law."
+    ]
+  },
+  {
+    title: "Limitation of liability",
+    body: [
+      "To the maximum extent permitted by law, Talaris is not liable for indirect, incidental, special, consequential, or punitive damages, and its total liability is limited to the amounts you paid in the 12 months before the claim. Nothing excludes liability for fraud, death or personal injury caused by negligence, or anything else that cannot be limited by law."
+    ]
+  },
+  {
+    title: "Termination",
+    body: [
+      "You may stop using the Service and close your account at any time. We may suspend or terminate access for breach of these Terms or legal necessity. Provisions that by nature should survive will survive."
+    ]
+  },
+  {
+    title: "Governing law and disputes",
+    body: [
+      "Subject to mandatory consumer protections in your country of residence (including your right to bring claims in your local courts), these Terms are governed by the laws of the jurisdiction to be specified by Talaris upon legal review, and disputes will be resolved in its courts. Export control and sanctions laws apply to your use of the Service."
+    ]
+  },
+  {
+    title: "Changes",
+    body: [
+      "We may update these Terms. Material changes will be announced in the Service or by email, and continued use after the effective date constitutes acceptance, except where the law requires fresh consent."
+    ]
+  }
+];
 
-        <div className="mt-8 space-y-8 text-sm leading-relaxed text-muted-foreground">
-          <section>
-            <h2 className="font-display text-lg font-medium text-foreground">1. Agreement</h2>
-            <p className="mt-2">
-              These Terms govern access to and use of Talaris&apos;s API console, dashboard, and
-              inference services (the &quot;Service&quot;). By creating an account or using the
-              Service you agree to be bound by these Terms. If you do not agree, do not use the
-              Service.
-            </p>
-          </section>
-          <section>
-            <h2 className="font-display text-lg font-medium text-foreground">2. Accounts</h2>
-            <p className="mt-2">
-              You are responsible for maintaining the confidentiality of your credentials and API
-              keys, and for all activity under your account. You must be at least 18 years old, or
-              the age of majority in your jurisdiction, to create an account.
-            </p>
-          </section>
-          <section>
-            <h2 className="font-display text-lg font-medium text-foreground">
-              3. Acceptable use
-            </h2>
-            <p className="mt-2">
-              You agree not to use the Service to generate or distribute unlawful content, to
-              attempt to circumvent rate limits or billing metering, or to reverse engineer the
-              underlying inference infrastructure. Usage is metered and billed per the plan
-              selected on the pricing page.
-            </p>
-          </section>
-          <section>
-            <h2 className="font-display text-lg font-medium text-foreground">
-              4. Billing and cancellation
-            </h2>
-            <p className="mt-2">
-              Paid plans are billed in advance through Stripe on a monthly or annual interval.
-              Credit allowances do not roll over between billing periods unless stated otherwise
-              on the plan. You may cancel or change plans at any time from the billing dashboard;
-              cancellation takes effect at the end of the current billing period.
-            </p>
-          </section>
-          <section>
-            <h2 className="font-display text-lg font-medium text-foreground">
-              5. Service availability
-            </h2>
-            <p className="mt-2">
-              The Service is provided on an &quot;as is&quot; and &quot;as available&quot; basis,
-              without warranties of any kind, express or implied. We do not guarantee
-              uninterrupted or error-free operation.
-            </p>
-          </section>
-          <section>
-            <h2 className="font-display text-lg font-medium text-foreground">
-              6. Limitation of liability
-            </h2>
-            <p className="mt-2">
-              To the maximum extent permitted by law, Talaris will not be liable for any indirect,
-              incidental, special, consequential, or punitive damages arising out of or related to
-              your use of the Service.
-            </p>
-          </section>
-          <section>
-            <h2 className="font-display text-lg font-medium text-foreground">7. Changes</h2>
-            <p className="mt-2">
-              We may update these Terms from time to time. Material changes will be reflected by
-              updating the date above. Continued use of the Service after a change constitutes
-              acceptance of the revised Terms.
-            </p>
-          </section>
-          <section>
-            <h2 className="font-display text-lg font-medium text-foreground">8. Contact</h2>
-            <p className="mt-2">
-              Questions about these Terms can be sent to{" "}
-              <a
-                href="mailto:contact@talaris.xyz"
-                className="focus-ring text-foreground underline-offset-4 hover:text-eggshell hover:underline"
-              >
-                contact@talaris.xyz
-              </a>
-              .
-            </p>
-          </section>
-        </div>
-      </main>
-      <SiteFooter />
-    </div>
-  );
+export default function TermsPage() {
+  return <LegalPage title="Terms of Service" updated="October 2026" sections={SECTIONS} />;
 }
