@@ -95,8 +95,8 @@ export default function WalletPage() {
           <CardHeader>
             <CardTitle>EVM wallet</CardTitle>
             <CardDescription>
-              Connect any wallet -- a browser extension or, via WalletConnect, a mobile or
-              hardware wallet -- then verify it below to link it to your account.
+              Connect any wallet (a browser extension or, via WalletConnect, a mobile or
+              hardware wallet), then verify it below to link it to your account.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">

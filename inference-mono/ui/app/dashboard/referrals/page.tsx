@@ -39,7 +39,7 @@ export default function ReferralsPage() {
     <>
       <DashboardPageHeader
         title="Referrals"
-        description="Share your link. When someone you referred pays for a plan or tops up their wallet, you earn 10% of that payment back as bonus inference-token credits -- not cash."
+        description="Share your link. When someone you referred pays for a plan or tops up their wallet, you earn 10% of that payment back as bonus inference-token credits, not cash."
         action={
           <Button variant="outline" onClick={() => void summaryQuery.refetch()}>
             <RefreshCw />
