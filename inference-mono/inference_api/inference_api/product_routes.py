@@ -12,19 +12,24 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from talaris_contracts import miner_hash as compute_miner_hash
+
 from inference_api.api_keys import APIKeyService, require_api_key
+from inference_api.attestation import sign_inference_receipt
 from inference_api.config import settings
 from inference_api.db import get_async_session
-from inference_api.errors import bad_request, not_found, service_unavailable, unauthorized
+from inference_api.errors import bad_request, forbidden, not_found, service_unavailable, unauthorized
 from inference_api.mesh import MeshInferenceClient
 from inference_api.miners.service import MinerRegistryService
 from inference_api.models import APIKey, Miner, MinerModel, User
+from inference_api.provisioner.key import load_provisioner_signing_key
 from inference_api.routing.forwarder import ForwardError, TEEForwarder, Usage
 from inference_api.routing.selector import MinerCandidate, MinerSelector
 from inference_api import stats_recorder
 from inference_api.schemas import (
     PROMPT_MAX_LENGTH,
     APIKeyUsageSummary,
+    AttestationReceipt,
     InferenceRequest,
     InferenceResponse,
     ModelInfo,
@@ -59,9 +64,17 @@ class InferenceExecution:
     output_tokens: int
     charged_tokens: int
     remaining_tokens: int
+    # The same per-request id used for stats/attestation (request_id_ctx, or a
+    # fresh uuid4 if the caller sent no X-Request-ID) -- NOT a function of the
+    # API key, and unique across requests even from the same key. See HYP-40.
+    request_id: str
     # False only when the opt-in dev echo fallback answered instead of a real
     # attested miner. See _execute_inference_mesh_fallback.
     attested: bool = True
+    # Populated iff `attested` -- a platform-signed, independently-verifiable
+    # receipt naming the exact enclave identity that served this response. See
+    # inference_api.attestation and _attestation_receipt_for below.
+    attestation: AttestationReceipt | None = None
 
     @property
     def usage(self) -> dict[str, int]:
@@ -128,6 +141,21 @@ def _model_not_found(model: str) -> HTTPException:
         status_code=status.HTTP_404_NOT_FOUND,
         detail={"code": "model_not_found", "message": f"Model {model!r} is not hosted by any registered miner"},
     )
+
+
+def _check_model_allowed(db_key: APIKey, model_id: str) -> None:
+    """Enforce an API key's optional model allowlist.
+
+    ``db_key.allowed_models`` is ``None``/empty for the common case (an
+    unrestricted key, matching every key created before this existed), so this
+    is a no-op unless the dashboard user opted into scoping the key down.
+    Checked before ``_model_not_found``/``no_capacity`` so a caller can't use
+    the error code to distinguish "never registered" from "registered but not
+    on your key's allowlist".
+    """
+    allowed = db_key.allowed_models
+    if allowed and model_id not in allowed:
+        raise forbidden(f"This API key is not permitted to use model {model_id!r}")
 
 
 def _prompt_too_long_error(prompt: str, exc: ValidationError) -> HTTPException:
@@ -199,6 +227,34 @@ def _chat_payload_from_prompt(payload: InferenceRequest) -> dict:
     }
 
 
+def _attestation_receipt_for(candidate: MinerCandidate, *, request_id: str, model_id: str) -> AttestationReceipt:
+    """Sign a per-request attestation receipt naming ``candidate``'s enclave identity.
+
+    Uses the SAME platform Ed25519 key that signs ``GET /allowlist`` and
+    ``GET /subnet/stats/*`` (``load_provisioner_signing_key``), so a caller who
+    already pins that key (from ``GET /attest``) can verify this receipt with no
+    additional trust anchor. See inference_api.attestation for the canonical
+    message + verification function.
+    """
+    try:
+        miner_hash_hex = compute_miner_hash(candidate.hotkey) if candidate.hotkey else None
+    except (ValueError, TypeError):
+        # A malformed/non-hex hotkey should never crash a served response --
+        # the receipt is still signed, just without this optional field.
+        miner_hash_hex = None
+    return sign_inference_receipt(
+        request_id=request_id,
+        model_id=model_id,
+        model_hash=candidate.model_hash,
+        enclave_verify_key=candidate.enclave_verify_key,
+        tls_cert_fingerprint=candidate.tls_cert_fingerprint,
+        miner_hash=miner_hash_hex,
+        attestation_mode=candidate.attestation_mode,
+        attestation_verified_at=candidate.attestation_verified_at_unix,
+        signing_key=load_provisioner_signing_key(),
+    )
+
+
 def _text_from_completion(body: dict | None) -> str:
     if not isinstance(body, dict):
         return ""
@@ -230,6 +286,7 @@ async def execute_inference(
     The SAME single reservation is reused across all failover candidates;
     settlement always uses the REAL token counts the enclave reports.
     """
+    _check_model_allowed(db_key, payload.model)
     user = await session.get(User, db_key.user_id)
     if user is None:
         raise unauthorized("API key owner no longer exists")
@@ -319,6 +376,10 @@ async def execute_inference(
                 output_tokens=output_tokens,
                 charged_tokens=usage_event.charged_tokens,
                 remaining_tokens=period.remaining_tokens,
+                request_id=request_id,
+                attestation=_attestation_receipt_for(
+                    candidate, request_id=request_id, model_id=payload.model
+                ),
             )
         # All candidates failed.
         await usage_service.release_inference_reservation(usage_event)
@@ -394,6 +455,7 @@ async def _execute_inference_mesh_fallback(
         output_tokens=output_tokens,
         charged_tokens=0,
         remaining_tokens=period.remaining_tokens,
+        request_id=usage_event.request_id,
         attested=False,
     )
 
@@ -445,6 +507,11 @@ def chat_completion_response(
         ],
         "usage": openai_usage(execution),
         "system_fingerprint": _system_fingerprint(execution),
+        # Non-standard additive field (OpenAI clients ignore unknown keys):
+        # mirrors InferenceResponse.attestation -- a platform-signed receipt a
+        # third party can verify against the pinned key from GET /attest. See
+        # inference_api.attestation.verify_inference_receipt.
+        "talaris_attestation": execution.attestation.model_dump() if execution.attestation else None,
     }
 
 
@@ -537,6 +604,10 @@ async def list_models(
     available_ids = set(await MinerRegistryService(session).list_available_models())
     all_ids = await _all_registered_model_ids(session)
     await session.commit()
+    if db_key.allowed_models:
+        # Scoped key: the catalog itself should match what it can actually
+        # reach, not just the enforcement on /inference and /chat/completions.
+        all_ids &= set(db_key.allowed_models)
     data = [
         ModelInfo(
             id=model_id,
@@ -555,6 +626,10 @@ async def get_model(
     session: AsyncSession = Depends(get_async_session),
     db_key: APIKey = Depends(require_api_key(["models:read"])),
 ) -> ModelInfo:
+    if db_key.allowed_models and model_id not in db_key.allowed_models:
+        # Matches list_models filtering the same model out of the catalog: a
+        # scoped key sees an out-of-scope model as absent, not forbidden.
+        raise not_found(f"Model {model_id!r} not found")
     available_ids = set(await MinerRegistryService(session).list_available_models())
     if model_id in available_ids:
         model = ModelInfo(id=model_id, owned_by="talaris-miner", status="available")
@@ -576,11 +651,15 @@ async def run_inference(
 ) -> InferenceResponse:
     execution = await execute_inference(request=request, payload=payload, session=session, db_key=db_key)
     return InferenceResponse(
-        id=f"inf_{db_key.id.hex[:24]}",
+        # Unique per request (not a function of the API key -- see HYP-40):
+        # the same id used for stats/attestation, sourced from X-Request-ID or
+        # a fresh uuid4, so it matches attestation.request_id when attested.
+        id=f"inf_{execution.request_id}",
         model=payload.model,
         output=execution.output,
         usage=execution.usage,
         attested=execution.attested,
+        attestation=execution.attestation,
     )
 
 
@@ -721,6 +800,9 @@ async def create_chat_completion(
         # ValidationError into a clean 422) is the only place an over-long
         # prompt would otherwise surface as an unhandled 500.
         raise _prompt_too_long_error(prompt, exc) from exc
+    # Covers BOTH branches below: the streaming path calls MinerSelector directly
+    # and never reaches execute_inference's own allowlist check.
+    _check_model_allowed(db_key, payload.model)
     # Real streaming pass-through when an attested miner serves the model.
     if payload.stream:
         candidates = await MinerSelector(session).select(payload.model)

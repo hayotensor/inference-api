@@ -590,6 +590,14 @@ sudo docker compose --env-file .env.production -f docker-compose.production.yml 
 sudo docker compose --env-file .env.production -f docker-compose.production.yml logs -f api inference_api ui
 ```
 
+> **Always apply Alembic migrations on redeploy** (`cd api && alembic upgrade head`; the
+> compose `api` service should do this on start). A DB left behind the code breaks
+> registration, API-key creation and `/referrals/me` with 500s/404s (seen live 2026-10-02:
+> DB stuck at `20260826_0011` while code was at `0015`).
+>
+> **Python `urllib` clients get Cloudflare error 1010** on the public API hostnames unless
+> they send an explicit `User-Agent`; see `talaris-edge/cloudflared/README.md` (HYP-26).
+
 ### 10. Useful Live Commands
 
 ```bash

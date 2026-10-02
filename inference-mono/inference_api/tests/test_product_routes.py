@@ -97,6 +97,48 @@ async def test_models_inference_and_usage_summary(
     assert usage.json()["output_tokens"] == 3
 
 
+async def test_inference_response_id_is_unique_per_request_not_the_api_key(
+    client, seed_api_key, seed_miner, seed_provisioned_token, reset_forwarder_transport
+):
+    """Regression test for HYP-40.
+
+    `id` used to be `f"inf_{db_key.id.hex[:24]}"` -- a function of the API key,
+    so every call made with the same key returned the identical `id`. It must
+    instead be unique per request (the same id used for stats/attestation) and
+    match `attestation.request_id` when the response is attested.
+    """
+    seeded = await seed_api_key(credits=10_000)
+    await _seed_attested_miner(seed_miner, seed_provisioned_token, model_id="demo-inference-001")
+    product_routes.set_forwarder_transport(
+        _stub_transport(content="hi", prompt_tokens=1, completion_tokens=1)
+    )
+
+    first = await client.post(
+        "/v1/inference",
+        headers={"X-API-Key": seeded.raw_key, "X-Request-ID": "req-one"},
+        json={"prompt": "hello platform"},
+    )
+    second = await client.post(
+        "/v1/inference",
+        headers={"X-API-Key": seeded.raw_key, "X-Request-ID": "req-two"},
+        json={"prompt": "hello platform again"},
+    )
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    first_body, second_body = first.json(), second.json()
+
+    api_key_derived_id = f"inf_{seeded.api_key_id.hex[:24]}"
+    assert first_body["id"] != api_key_derived_id
+    assert second_body["id"] != api_key_derived_id
+    assert first_body["id"] != second_body["id"]
+    assert first_body["id"] == "inf_req-one"
+    assert second_body["id"] == "inf_req-two"
+    # Matches the signed attestation receipt's request_id when attested.
+    assert first_body["attested"] is True
+    assert first_body["id"] == f"inf_{first_body['attestation']['request_id']}"
+    assert second_body["id"] == f"inf_{second_body['attestation']['request_id']}"
+
+
 async def test_api_key_scope_expiration_and_revocation_failures(client, seed_api_key):
     wildcard = await seed_api_key(raw_key="sk_test_wildcard", scopes=["*"])
     wildcard_response = await client.get("/v1/models", headers={"Authorization": f"Bearer {wildcard.raw_key}"})

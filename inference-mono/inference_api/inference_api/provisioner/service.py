@@ -52,6 +52,7 @@ from talaris_contracts import (
 )
 from talaris_contracts.registration import TeeEndpointError, validate_tee_endpoint
 
+from inference_api.allowlist_seed import sync_observed_model_allowlist
 from inference_api.config import settings
 from inference_api.crypto import encrypt_token
 from inference_api.models import Miner, MinerModel, ModelAllowlist, ProvisionedToken
@@ -386,6 +387,18 @@ class ProvisionerService:
         mm.usage_total_tokens = doc.usage_total_tokens
         self.session.add(mm)
         await self.session.flush()
+
+        # Trust-on-first-attest: publish this genuinely hardware-verified
+        # model_hash into the platform allowlist iff nothing pins model_id yet
+        # (never overrides an operator's own pin). See its docstring for why
+        # this is safe: it only ever ADDS a pin where the check was
+        # previously skipped entirely for lack of one.
+        await sync_observed_model_allowlist(
+            self.session,
+            model_id=mm.model_id,
+            model_version=mm.model_version,
+            model_hash=mm.model_hash,
+        )
 
         # 8. (optional, flag-gated) the platform holds the only admin token, so only
         # it can drive this enclave's engine. When enabled, start the model in the

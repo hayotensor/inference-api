@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +35,15 @@ from inference_api.miners.service import (
     MAX_QUEUE_DEPTH,
 )
 from inference_api.security import utcnow
+
+
+def _unix(dt) -> int | None:
+    """A (possibly naive, e.g. SQLite) datetime as a unix int, treated as UTC."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp())
 
 
 @dataclass(frozen=True)
@@ -51,6 +60,13 @@ class MinerCandidate:
     tee_endpoint: str
     tls_cert_fingerprint: str | None
     model_hash: str | None
+    # Carried so a served response can be accompanied by a signed attestation
+    # receipt (see inference_api.attestation) naming exactly which enclave
+    # identity -- verified once, at provisioning time, via
+    # talaris_attest.verify_attestation -- produced it.
+    enclave_verify_key: str | None
+    attestation_mode: str | None
+    attestation_verified_at_unix: int | None
     available_concurrent_requests: int
     queue_depth: int
     reputation: float
@@ -180,6 +196,11 @@ class MinerSelector:
                     tee_endpoint=mm.tee_endpoint or miner.tee_endpoint,
                     tls_cert_fingerprint=mm.tls_cert_fingerprint or miner.tls_cert_fingerprint,
                     model_hash=mm.model_hash,
+                    enclave_verify_key=mm.enclave_verify_key or miner.enclave_verify_key,
+                    attestation_mode=mm.attestation_mode or miner.attestation_mode,
+                    attestation_verified_at_unix=_unix(
+                        mm.attestation_verified_at or miner.attestation_verified_at
+                    ),
                     available_concurrent_requests=_capacity_int(
                         capacity,
                         "available_concurrent_requests",
