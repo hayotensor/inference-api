@@ -57,7 +57,7 @@ export function BillingIntervalToggle({
               <span
                 className={cn(
                   "font-mono text-[10px] tracking-normal",
-                  active ? "text-background/70" : "text-stone"
+                  active ? "text-primary-foreground/70" : "text-stone"
                 )}
               >
                 −{savingsPercent}%

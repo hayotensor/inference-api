@@ -25,12 +25,38 @@ def validate_future_expiration(value: datetime | None) -> datetime | None:
     return value
 
 
+def validate_allowed_models(value: list[str] | None) -> list[str] | None:
+    """Normalize an optional model allowlist.
+
+    ``None`` (or an empty list) means unrestricted -- the key can reach every
+    model, same as an unset ``scopes`` default would if that were allowed.
+    Entries are stripped and de-duplicated (order preserved) so trivially
+    different submissions ("gpt-4", "gpt-4 ") don't create surprising
+    near-duplicate restrictions.
+    """
+    if not value:
+        return None
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for model_id in value:
+        model_id = model_id.strip()
+        if not model_id:
+            raise ValueError("allowed_models entries must be non-empty strings")
+        if model_id not in seen:
+            seen.add(model_id)
+            cleaned.append(model_id)
+    return cleaned or None
+
+
 class APIKeyCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     environment: APIKeyEnvironment = APIKeyEnvironment.test
     scopes: list[str] = Field(default_factory=lambda: DEFAULT_SCOPES.copy())
     expires_at: datetime | None = None
     rate_limit_per_minute: int | None = Field(default=None, ge=1, le=60_000)
+    # Optional: restrict this key to a specific set of model ids. Unset/empty
+    # means unrestricted -- the key can reach every model, same as today.
+    allowed_models: list[str] | None = None
 
     @field_validator("scopes")
     @classmethod
@@ -42,12 +68,18 @@ class APIKeyCreate(BaseModel):
     def expires_at_is_future(cls, value: datetime | None) -> datetime | None:
         return validate_future_expiration(value)
 
+    @field_validator("allowed_models")
+    @classmethod
+    def allowed_models_are_clean(cls, value: list[str] | None) -> list[str] | None:
+        return validate_allowed_models(value)
+
 
 class APIKeyUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     scopes: list[str] | None = None
     expires_at: datetime | None = None
     rate_limit_per_minute: int | None = Field(default=None, ge=1, le=60_000)
+    allowed_models: list[str] | None = None
 
     @field_validator("scopes")
     @classmethod
@@ -61,6 +93,11 @@ class APIKeyUpdate(BaseModel):
     def expires_at_is_future(cls, value: datetime | None) -> datetime | None:
         return validate_future_expiration(value)
 
+    @field_validator("allowed_models")
+    @classmethod
+    def allowed_models_are_clean(cls, value: list[str] | None) -> list[str] | None:
+        return validate_allowed_models(value)
+
 
 class APIKeyRead(BaseModel):
     id: uuid.UUID
@@ -70,6 +107,7 @@ class APIKeyRead(BaseModel):
     prefix: str
     last_four: str
     scopes: list[str]
+    allowed_models: list[str] | None
     rate_limit_per_minute: int
     created_at: datetime
     expires_at: datetime | None

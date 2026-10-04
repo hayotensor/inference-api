@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Request, Response, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api_keys.schemas import APIKeyCreate, APIKeyCreateResponse, APIKeyRead, APIKeyUpdate
@@ -8,10 +9,38 @@ from app.api_keys.service import APIKeyService
 from app.audit.service import write_audit_log
 from app.auth.dependencies import current_active_user
 from app.core.rate_limit import limiter
+from app.db.models.miner import Miner, MinerModel
 from app.db.models.user import User
 from app.db.session import get_async_session
 
 router = APIRouter(prefix="/api-keys", tags=["api-keys"])
+
+# Mirrors inference_api/product_routes.py's `_TERMINAL_MINER_STATES`: a model
+# whose only host was revoked shouldn't be offered as something a new key can
+# be scoped to.
+_TERMINAL_MINER_STATES = ("revoked",)
+
+
+@router.get("/available-models", response_model=list[str])
+@limiter.limit("60/minute")
+async def list_available_models(
+    request: Request,
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user),
+) -> list[str]:
+    """Distinct model ids currently advertised by a non-terminal miner.
+
+    Powers the "restrict to models" picker on the create/edit API key forms --
+    just the known ids, no availability/health detail (that's what the
+    inference-serving ``GET /v1/models`` is for).
+    """
+    result = await session.execute(
+        select(MinerModel.model_id)
+        .join(Miner, Miner.id == MinerModel.miner_id)
+        .where(Miner.attestation_status.notin_(_TERMINAL_MINER_STATES))
+        .distinct()
+    )
+    return sorted({row[0] for row in result.all()})
 
 
 @router.post("", response_model=APIKeyCreateResponse, status_code=status.HTTP_201_CREATED)

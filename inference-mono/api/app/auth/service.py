@@ -35,6 +35,17 @@ from app.email.service import EmailService
 logger = logging.getLogger(__name__)
 
 
+class IncorrectPasswordError(Exception):
+    """Raised by `UserManager.change_password` when `current_password` doesn't match.
+
+    Kept distinct from `fastapi_users.InvalidPasswordException` (which
+    `change_password` still raises for a *new* password that fails
+    `validate_password`) so the route -- and the frontend -- can tell "you
+    typed your current password wrong" apart from "your new password is too
+    weak" instead of collapsing both into one generic 400.
+    """
+
+
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     reset_password_token_secret = settings.reset_password_token_secret.get_secret_value()
     reset_password_token_lifetime_seconds = 3600
@@ -172,6 +183,51 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             session.add(user)
             await session.commit()
         logger.info("auth.password_reset", extra={"user_id": str(user.id)})
+
+    async def change_password(
+        self,
+        user: User,
+        current_password: str,
+        new_password: str,
+        request: Request | None = None,
+    ) -> User:
+        """Authenticated in-session password change (Settings -> Change password).
+
+        Distinct from `reset_password` (unauthenticated, token-from-email): this
+        path requires proving knowledge of the *current* password before setting
+        a new one, since the caller only had to possess a still-live access
+        token to reach it -- e.g. a stolen/XSS'd token shouldn't be enough to
+        lock the real owner out. An SSO-only account's `hashed_password` is a
+        random value nobody knows (see fastapi_users' oauth_callback), so it
+        naturally always fails verification here too; the frontend additionally
+        never shows this form for such accounts.
+        """
+        verified, _ = self.password_helper.verify_and_update(
+            current_password, user.hashed_password
+        )
+        if not verified:
+            raise IncorrectPasswordError()
+        await self.validate_password(new_password, user)
+        user = await self.user_db.update(user, {"hashed_password": self.password_helper.hash(new_password)})
+        await self.on_after_change_password(user, request)
+        return user
+
+    async def on_after_change_password(self, user: User, request: Request | None = None) -> None:
+        session = getattr(self.user_db, "session", None)
+        if session is not None:
+            now = utcnow()
+            await session.execute(
+                update(RefreshToken)
+                .where(
+                    RefreshToken.user_id == user.id,
+                    RefreshToken.revoked_at.is_(None),
+                )
+                .values(revoked_at=now)
+            )
+            user.token_version += 1
+            session.add(user)
+            await session.commit()
+        logger.info("auth.password_changed", extra={"user_id": str(user.id)})
 
 
 async def get_user_db(

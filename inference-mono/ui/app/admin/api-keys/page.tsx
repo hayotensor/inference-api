@@ -21,6 +21,7 @@ import { useAdmin } from "@/components/admin-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -29,6 +30,7 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -37,7 +39,7 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table";
-import { adminApi, apiErrorMessage } from "@/lib/api";
+import { adminApi, apiErrorMessage, apiKeysApi } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import type { ApiKeyRead } from "@/lib/types";
 
@@ -45,7 +47,8 @@ const limit = 25;
 
 const keySchema = z.object({
   name: z.string().min(1).max(120),
-  rate_limit_per_minute: z.coerce.number().int().min(1).max(60000)
+  rate_limit_per_minute: z.coerce.number().int().min(1).max(60000),
+  allowed_models: z.array(z.string()).optional()
 });
 
 type KeyForm = z.infer<typeof keySchema>;
@@ -68,15 +71,22 @@ export default function AdminApiKeysPage() {
       adminApi.apiKeys({ limit, offset, search, status, sort }, { signal })
   });
 
+  const modelsQuery = useQuery({
+    queryKey: ["api-keys", "available-models"],
+    queryFn: apiKeysApi.availableModels
+  });
+
   const form = useForm<KeyForm>({
     resolver: zodResolver(keySchema),
     values: editing
       ? {
           name: editing.name,
-          rate_limit_per_minute: editing.rate_limit_per_minute
+          rate_limit_per_minute: editing.rate_limit_per_minute,
+          allowed_models: editing.allowed_models ?? []
         }
       : undefined
   });
+  const selectedModels = form.watch("allowed_models") ?? [];
 
   const invalidate = async () => {
     await queryClient.invalidateQueries({ queryKey: ["admin", "api-keys"] });
@@ -88,7 +98,10 @@ export default function AdminApiKeysPage() {
       editing
         ? adminApi.updateApiKey(editing.id, {
             name: values.name,
-            rate_limit_per_minute: values.rate_limit_per_minute
+            rate_limit_per_minute: values.rate_limit_per_minute,
+            allowed_models: values.allowed_models && values.allowed_models.length > 0
+              ? values.allowed_models
+              : null
           })
         : Promise.reject(new Error("No API key selected")),
     onSuccess: async () => {
@@ -163,6 +176,7 @@ export default function AdminApiKeysPage() {
                   <TableHead>User</TableHead>
                   <TableHead>Environment</TableHead>
                   <TableHead>Rate</TableHead>
+                  <TableHead>Models</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Last used</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -191,6 +205,19 @@ export default function AdminApiKeysPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>{apiKey.rate_limit_per_minute}/min</TableCell>
+                      <TableCell>
+                        {apiKey.allowed_models && apiKey.allowed_models.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {apiKey.allowed_models.map((modelId) => (
+                              <Badge key={modelId} variant="outline" className="font-mono text-xs">
+                                {modelId}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">All models</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <Badge variant={revoked || expired ? "destructive" : "success"}>
                           {revoked ? "revoked" : expired ? "expired" : "active"}
@@ -253,6 +280,33 @@ export default function AdminApiKeysPage() {
             <LabeledControl label="Rate limit per minute">
               <Input type="number" min={1} max={60000} {...form.register("rate_limit_per_minute")} />
             </LabeledControl>
+            <div className="space-y-2">
+              <Label>Restrict to models (optional)</Label>
+              <p className="text-sm text-muted-foreground">
+                Leave everything unchecked to let this key reach every model.
+              </p>
+              {modelsQuery.data && modelsQuery.data.length > 0 ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {modelsQuery.data.map((modelId) => (
+                    <label
+                      key={modelId}
+                      className="flex items-center gap-2 rounded-md border p-3 text-sm"
+                    >
+                      <Checkbox
+                        checked={selectedModels.includes(modelId)}
+                        onCheckedChange={(checked) => {
+                          const next = checked
+                            ? [...selectedModels, modelId]
+                            : selectedModels.filter((value) => value !== modelId);
+                          form.setValue("allowed_models", next, { shouldValidate: true });
+                        }}
+                      />
+                      <span className="font-mono text-xs">{modelId}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setEditing(null)}>
                 Cancel

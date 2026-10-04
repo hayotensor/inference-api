@@ -49,7 +49,9 @@ const createSchema = z.object({
   environment: z.enum(["test", "live"]),
   scopes: z.array(z.enum(["models:read", "inference:write", "usage:read"])).min(1),
   expires_at: z.string().optional(),
-  rate_limit_per_minute: z.coerce.number().int().min(1).max(60000).optional()
+  rate_limit_per_minute: z.coerce.number().int().min(1).max(60000).optional(),
+  // Empty = unrestricted (the key can reach every model). Optional on purpose.
+  allowed_models: z.array(z.string()).optional()
 });
 
 type CreateKeyForm = z.infer<typeof createSchema>;
@@ -66,7 +68,8 @@ export default function ApiKeysPage() {
       environment: "test",
       scopes: ["models:read", "inference:write", "usage:read"],
       expires_at: "",
-      rate_limit_per_minute: 600
+      rate_limit_per_minute: 600,
+      allowed_models: []
     }
   });
 
@@ -75,12 +78,20 @@ export default function ApiKeysPage() {
     queryFn: apiKeysApi.list
   });
 
+  const modelsQuery = useQuery({
+    queryKey: ["api-keys", "available-models"],
+    queryFn: apiKeysApi.availableModels
+  });
+
   const createMutation = useMutation({
     mutationFn: (values: CreateKeyForm) =>
       apiKeysApi.create({
         ...values,
         expires_at: values.expires_at ? new Date(values.expires_at).toISOString() : null,
-        rate_limit_per_minute: values.rate_limit_per_minute || null
+        rate_limit_per_minute: values.rate_limit_per_minute || null,
+        allowed_models: values.allowed_models && values.allowed_models.length > 0
+          ? values.allowed_models
+          : null
       }),
     onSuccess: async (response) => {
       setPlaintextKey(response);
@@ -104,6 +115,7 @@ export default function ApiKeysPage() {
   });
 
   const selectedScopes = form.watch("scopes");
+  const selectedModels = form.watch("allowed_models") ?? [];
 
   return (
     <>
@@ -189,6 +201,40 @@ export default function ApiKeysPage() {
             </div>
           </div>
 
+          <div className="mt-4 space-y-2">
+            <Label>Restrict to models (optional)</Label>
+            <p className="text-sm text-muted-foreground">
+              Leave everything unchecked to let this key reach every model.
+            </p>
+            {modelsQuery.isLoading ? <LoadingState /> : null}
+            {modelsQuery.data && modelsQuery.data.length > 0 ? (
+              <div className="grid gap-2 sm:grid-cols-3">
+                {modelsQuery.data.map((modelId) => (
+                  <label
+                    key={modelId}
+                    className="flex items-center gap-2 rounded-md border p-3 text-sm"
+                  >
+                    <Checkbox
+                      checked={selectedModels.includes(modelId)}
+                      onCheckedChange={(checked) => {
+                        const next = checked
+                          ? [...selectedModels, modelId]
+                          : selectedModels.filter((value) => value !== modelId);
+                        form.setValue("allowed_models", next, { shouldValidate: true });
+                      }}
+                    />
+                    <span className="font-mono text-xs">{modelId}</span>
+                  </label>
+                ))}
+              </div>
+            ) : null}
+            {modelsQuery.data && modelsQuery.data.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No models are registered yet -- this key will reach every model once one is.
+              </p>
+            ) : null}
+          </div>
+
           {createError ? (
             <div className="mt-4 flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -229,7 +275,7 @@ export default function ApiKeysPage() {
       {keysQuery.data?.length === 0 ? (
         <EmptyState
           title="No API keys"
-          description="Create a key to call the product API from your own code or the playground."
+          description="Create a key to call the product API from your own code."
           action={
             <Button onClick={() => setShowCreate(true)}>
               <Plus />
@@ -247,6 +293,7 @@ export default function ApiKeysPage() {
                 <TableHead>Key</TableHead>
                 <TableHead>Environment</TableHead>
                 <TableHead>Scopes</TableHead>
+                <TableHead>Models</TableHead>
                 <TableHead>Last used</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -277,6 +324,19 @@ export default function ApiKeysPage() {
                           </Badge>
                         ))}
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      {key.allowed_models && key.allowed_models.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {key.allowed_models.map((modelId) => (
+                            <Badge key={modelId} variant="outline" className="font-mono text-xs">
+                              {modelId}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">All models</span>
+                      )}
                     </TableCell>
                     <TableCell>{formatDateTime(key.last_used_at)}</TableCell>
                     <TableCell>

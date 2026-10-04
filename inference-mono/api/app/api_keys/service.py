@@ -12,6 +12,7 @@ from app.api_keys.schemas import (
     APIKeyCreateResponse,
     APIKeyRead,
     APIKeyUpdate,
+    validate_allowed_models,
     validate_api_key_scopes,
 )
 from app.core.config import settings
@@ -31,11 +32,19 @@ class APIKeyService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def create_key(self, user: User, payload: APIKeyCreate) -> APIKeyCreateResponse:
+    @staticmethod
+    def _ensure_verified(user: User) -> None:
+        """Shared verify gate: any live key mint — self-service or internal —
+        must go through this. See ``mint_managed_chat_key`` for why the edge
+        broker path used to bypass it (HYP-27: it must not).
+        """
         if not (user.is_verified or user.phone_verified_at or user.wallet_verified_at):
             raise forbidden(
                 "Verify an email address, phone number, or wallet before creating API keys"
             )
+
+    async def create_key(self, user: User, payload: APIKeyCreate) -> APIKeyCreateResponse:
+        self._ensure_verified(user)
         validate_api_key_scopes(payload.scopes)
         active_count = await self.session.scalar(
             select(func.count())
@@ -57,6 +66,7 @@ class APIKeyService:
             last_four=last_four,
             hashed_key=keyed_hash(full_key),
             scopes=payload.scopes,
+            allowed_models=validate_allowed_models(payload.allowed_models),
             expires_at=payload.expires_at,
             rate_limit_per_minute=(
                 payload.rate_limit_per_minute or settings.api_key_default_rate_limit_per_minute
@@ -77,16 +87,26 @@ class APIKeyService:
     ) -> APIKeyCreateResponse:
         """Mint, or rotate in place, a managed live chat key for the edge broker.
 
-        Trusted action invoked only via an ``edge`` service token, so it bypasses
-        the human ``is_verified`` gate. One row per user for this ``name``: an
-        existing active row has its secret rotated in place rather than being
-        revoked-and-replaced, so the row doesn't multiply every time the edge
-        cache's TTL lapses between chat sessions. Any *extra* active duplicates
-        (e.g. left over from before rotate-in-place) are revoked here, converging
-        back to exactly one canonical row. The raw secret is returned exactly
-        once (only its hash is stored), so the edge cache is the source of
-        truth — a cache miss re-mints/rotates.
+        Trusted action invoked only via an ``edge`` service token, but the
+        service-token trust boundary authenticates the *broker*, not the human
+        behind the chat session — it must NOT be used to skip the same
+        ``is_verified``-or-phone-or-wallet gate ``create_key`` enforces
+        (HYP-27: Open-WebUI was minting live ``sk_live_*`` keys for unverified
+        users through exactly this path). Callers that need the mint to happen
+        without interrupting the request (e.g. surfacing a verify wall in the
+        chat UI instead of a raw 500) should check ``user.is_verified``/
+        ``phone_verified_at``/``wallet_verified_at`` themselves before calling.
+
+        One row per user for this ``name``: an existing active row has its
+        secret rotated in place rather than being revoked-and-replaced, so the
+        row doesn't multiply every time the edge cache's TTL lapses between
+        chat sessions. Any *extra* active duplicates (e.g. left over from
+        before rotate-in-place) are revoked here, converging back to exactly
+        one canonical row. The raw secret is returned exactly once (only its
+        hash is stored), so the edge cache is the source of truth — a cache
+        miss re-mints/rotates.
         """
+        self._ensure_verified(user)
         existing = await self.session.execute(
             select(APIKey)
             .where(
@@ -148,6 +168,8 @@ class APIKeyService:
         update_data = payload.model_dump(exclude_unset=True)
         if "scopes" in update_data and update_data["scopes"] is not None:
             validate_api_key_scopes(update_data["scopes"])
+        if "allowed_models" in update_data:
+            update_data["allowed_models"] = validate_allowed_models(update_data["allowed_models"])
         for field, value in update_data.items():
             setattr(db_key, field, value)
         self.session.add(db_key)

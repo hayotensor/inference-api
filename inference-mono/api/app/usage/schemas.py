@@ -69,11 +69,17 @@ class UsageByModelRead(BaseModel):
 
 class UsageByModelResponse(BaseModel):
     data: list[UsageByModelRead]
+    total: int
+    limit: int
+    offset: int
 
 
 class UsageByModelDetailResponse(BaseModel):
     summary: UsageByModelRead
     events: list[UsageEventRead]
+    total_events: int
+    limit: int
+    offset: int
 
 
 class UsageRecalculateRequest(BaseModel):

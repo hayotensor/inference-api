@@ -49,11 +49,13 @@ async def usage_history(
 @limiter.limit("60/minute")
 async def usage_by_model(
     request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_async_session),
     user: User = Depends(current_active_user),
 ) -> UsageByModelResponse:
-    rows = await UsageService(session).usage_by_model(user)
-    return UsageByModelResponse(data=rows)
+    rows, total = await UsageService(session).usage_by_model(user, limit=limit, offset=offset)
+    return UsageByModelResponse(data=rows, total=total, limit=limit, offset=offset)
 
 
 @router.get("/by-model/{model}", response_model=UsageByModelDetailResponse)
@@ -62,14 +64,21 @@ async def usage_by_model_detail(
     request: Request,
     model: str,
     limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_async_session),
     user: User = Depends(current_active_user),
 ) -> UsageByModelDetailResponse:
-    result = await UsageService(session).usage_by_model_detail(user, model, limit=limit)
+    result = await UsageService(session).usage_by_model_detail(user, model, limit=limit, offset=offset)
     if result is None:
         raise not_found("No usage found for this model")
     summary, events = result
-    return UsageByModelDetailResponse(summary=summary, events=events)
+    return UsageByModelDetailResponse(
+        summary=summary,
+        events=events,
+        total_events=summary["request_count"],
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/allowance", response_model=UsageAllowanceRead)

@@ -35,20 +35,23 @@ export function StatCard({
     <Card
       className={cn(
         "flex flex-col",
-        emphasis && "border-transparent bg-eggshell text-background",
+        // Eggshell is a fixed fill, not a themed one -- it needs Void Black
+        // text in both dark and light mode, so this is `text-void`
+        // (hardcoded), never `text-background` (which flips under `.light`).
+        emphasis && "border-transparent bg-eggshell text-void",
         className
       )}
     >
       <div
         className={cn(
           "flex items-center justify-between gap-3 border-b px-5 py-3",
-          emphasis ? "border-background/15" : "border-border"
+          emphasis ? "border-void/15" : "border-border"
         )}
       >
         <span
           className={cn(
             "eyebrow truncate",
-            emphasis && "text-background/70"
+            emphasis && "text-void/70"
           )}
         >
           {label}
@@ -56,7 +59,7 @@ export function StatCard({
         <Icon
           className={cn(
             "h-4 w-4 shrink-0",
-            emphasis ? "text-background/70" : "text-muted-foreground"
+            emphasis ? "text-void/70" : "text-muted-foreground"
           )}
           strokeWidth={1.5}
         />
@@ -69,7 +72,7 @@ export function StatCard({
           <p
             className={cn(
               "metadata mt-1.5 truncate text-xs",
-              emphasis && "text-background/70"
+              emphasis && "text-void/70"
             )}
           >
             {detail}

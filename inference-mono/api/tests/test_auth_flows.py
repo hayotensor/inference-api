@@ -217,6 +217,89 @@ async def test_forgot_password_survives_a_failing_email_sender(client, monkeypat
     assert response.status_code == 202, response.text
 
 
+async def test_change_password_requires_current_password_and_invalidates_old_session(
+    client, monkeypatch
+):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "auto_verify_new_users", True)
+    await client.post(
+        "/auth/register",
+        json={"email": "changepw@example.com", "password": "correct-horse-123", "full_name": "Change PW"},
+    )
+    login = await client.post(
+        "/auth/login",
+        json={"email": "changepw@example.com", "password": "correct-horse-123"},
+    )
+    assert login.status_code == 200
+    tokens = login.json()
+    auth_headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    wrong = await client.post(
+        "/auth/change-password",
+        headers=auth_headers,
+        json={"current_password": "not-the-password", "new_password": "new-correct-horse-123"},
+    )
+    assert wrong.status_code == 400
+    assert wrong.json()["detail"]["code"] == "incorrect_current_password"
+
+    weak = await client.post(
+        "/auth/change-password",
+        headers=auth_headers,
+        json={"current_password": "correct-horse-123", "new_password": "short"},
+    )
+    assert weak.status_code in (400, 422)
+
+    changed = await client.post(
+        "/auth/change-password",
+        headers=auth_headers,
+        json={"current_password": "correct-horse-123", "new_password": "new-correct-horse-123"},
+    )
+    assert changed.status_code == 200, changed.text
+
+    # The access token issued before the change is dead immediately (token_version
+    # bump), same guarantee reset-password gives.
+    old_access_rejected = await client.get("/me", headers=auth_headers)
+    assert old_access_rejected.status_code == 401
+
+    old_login = await client.post(
+        "/auth/login",
+        json={"email": "changepw@example.com", "password": "correct-horse-123"},
+    )
+    assert old_login.status_code == 401
+
+    new_login = await client.post(
+        "/auth/login",
+        json={"email": "changepw@example.com", "password": "new-correct-horse-123"},
+    )
+    assert new_login.status_code == 200
+
+
+async def test_update_me_rejects_password_field(client, monkeypatch):
+    """PATCH /me must not be a side-door around change-password's current-password
+    check and session revocation -- see app/users/service.py `update_me`."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "auto_verify_new_users", True)
+    await client.post(
+        "/auth/register",
+        json={"email": "sidedoor@example.com", "password": "correct-horse-123"},
+    )
+    login = await client.post(
+        "/auth/login",
+        json={"email": "sidedoor@example.com", "password": "correct-horse-123"},
+    )
+    access_token = login.json()["access_token"]
+
+    update = await client.patch(
+        "/me",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={"password": "sneaky-new-password-123"},
+    )
+    assert update.status_code == 400
+    assert update.json()["detail"]["code"] == "use_change_password_endpoint"
+
+
 async def test_verification_email_can_be_requested_twice_in_the_same_second(client, monkeypatch):
     """The verify token is a JWT whose only varying input is `exp`, so two requests
     inside one second are byte-identical. Recording the hash must tolerate that or

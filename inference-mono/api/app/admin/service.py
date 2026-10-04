@@ -51,8 +51,13 @@ from app.admin.schemas import (
     AdminWalletRead,
     AdminWalletSyncResponse,
 )
-from app.api_keys.schemas import validate_api_key_scopes, validate_future_expiration
+from app.api_keys.schemas import (
+    validate_allowed_models,
+    validate_api_key_scopes,
+    validate_future_expiration,
+)
 from app.audit.service import write_audit_log
+from app.billing.plans import looks_like_test_plan
 from app.billing.service import BillingService
 from app.core.errors import bad_request, forbidden, not_found
 from app.core.security import normalize_phone_number, utcnow
@@ -439,6 +444,11 @@ class AdminService:
                 validate_future_expiration(update_data["expires_at"])
             except ValueError as exc:
                 raise bad_request("invalid_api_key_expiration", str(exc)) from exc
+        if "allowed_models" in update_data:
+            try:
+                update_data["allowed_models"] = validate_allowed_models(update_data["allowed_models"])
+            except ValueError as exc:
+                raise bad_request("invalid_allowed_models", str(exc)) from exc
         for field, value in update_data.items():
             setattr(api_key, field, value)
         self.session.add(api_key)
@@ -575,6 +585,24 @@ class AdminService:
             stripe_price_id=payload.stripe_price_id,
             stripe_annual_price_id=payload.stripe_annual_price_id,
         )
+        # HYP-22: a plan that reads as a test/e2e fixture (by slug/name) or that
+        # carries an unmistakably fake Stripe price ID must never be created as
+        # active/visible, even if the caller asked for that explicitly. This is
+        # exactly the shape of the leak this ticket fixed -- an e2e suite POSTing
+        # a throwaway plan to this endpoint against the wrong (production)
+        # database and never cleaning it up. update_billing_plan and
+        # activate_billing_plan enforce the same rule so there's no other path
+        # to an active/visible test plan either.
+        active = payload.active
+        visible = payload.visible
+        if looks_like_test_plan(
+            slug=slug,
+            name=payload.name,
+            stripe_price_id=payload.stripe_price_id,
+            stripe_annual_price_id=payload.stripe_annual_price_id,
+        ):
+            active = False
+            visible = False
         plan = BillingPlan(
             slug=slug,
             name=payload.name,
@@ -585,8 +613,8 @@ class AdminService:
             annual_price_cents=payload.annual_price_cents,
             currency=payload.currency,
             monthly_token_allowance=payload.monthly_token_allowance,
-            active=payload.active,
-            visible=payload.visible,
+            active=active,
+            visible=visible,
             sort_order=payload.sort_order,
             features=payload.features,
         )
@@ -637,6 +665,16 @@ class AdminService:
         ):
             if field in update_data:
                 setattr(plan, field, update_data[field])
+        # HYP-22: same rule as create_billing_plan -- an update can't leave a
+        # test/e2e-looking plan (or one with a fake Stripe price ID) active/visible.
+        if looks_like_test_plan(
+            slug=plan.slug,
+            name=plan.name,
+            stripe_price_id=plan.stripe_price_id,
+            stripe_annual_price_id=plan.stripe_annual_price_id,
+        ):
+            plan.active = False
+            plan.visible = False
         self.session.add(plan)
         await self.session.flush()
         await self._audit(
@@ -671,6 +709,20 @@ class AdminService:
         self, context: AdminContext, plan_id: uuid.UUID, request: Request
     ) -> AdminBillingPlanRead:
         plan = await self._get_billing_plan(plan_id)
+        # HYP-22: refuse to (re-)activate a plan that reads as a test/e2e fixture
+        # or carries a fake Stripe price ID -- same rule as create/update.
+        if looks_like_test_plan(
+            slug=plan.slug,
+            name=plan.name,
+            stripe_price_id=plan.stripe_price_id,
+            stripe_annual_price_id=plan.stripe_annual_price_id,
+        ):
+            raise bad_request(
+                "test_plan_cannot_be_activated",
+                "This plan looks like a test/e2e fixture (slug/name or a "
+                "price_fake_* Stripe price ID) and cannot be activated or made "
+                "visible; rename it and repoint it at a real Stripe price first.",
+            )
         plan.active = True
         plan.visible = True
         self.session.add(plan)

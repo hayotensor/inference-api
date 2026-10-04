@@ -2,6 +2,7 @@ from sqlalchemy import select
 
 from app.db.models.api_key import APIKey
 from app.db.models.service_client import ServiceClientRole
+from app.db.models.user import User
 from app.db.session import async_session_maker
 from app.service_clients.schemas import ServiceClientCreate
 from app.service_clients.service import ServiceClientService
@@ -25,9 +26,21 @@ async def _register(client, email: str) -> str:
     return reg.json()["id"]
 
 
-async def test_edge_mints_chat_key_by_email_for_unverified_user(client):
-    # Freshly registered users are NOT verified; the internal broker bypasses the
-    # is_verified gate, so the edge can still bill their chat traffic.
+async def _mark_verified(email: str) -> None:
+    async with async_session_maker() as session:
+        user = (await session.execute(select(User).where(User.email == email))).scalar_one()
+        user.is_verified = True
+        session.add(user)
+        await session.commit()
+
+
+async def test_edge_mint_by_email_refuses_unverified_user(client):
+    # HYP-27: freshly registered users are NOT verified. The internal broker
+    # path is authenticated by a trusted `edge` service token, but that token
+    # authenticates the broker as a caller, not the human behind the chat
+    # session — it must enforce the exact same verify gate as the public
+    # POST /api-keys, not bypass it. This is the regression test for the
+    # "Open-WebUI mints a live key before email verify" bug.
     await _register(client, "chatuser@example.com")
     token = await _mint_service_token(ServiceClientRole.edge)
 
@@ -35,6 +48,41 @@ async def test_edge_mints_chat_key_by_email_for_unverified_user(client):
         "/internal/users/by-email/chat-key",
         headers={"Authorization": f"Bearer {token}"},
         json={"email": "chatuser@example.com"},
+    )
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"]["code"] == "forbidden"
+
+    # No live key, and specifically no `openwebui-chat` key, was minted.
+    async with async_session_maker() as session:
+        user = (
+            await session.execute(select(User).where(User.email == "chatuser@example.com"))
+        ).scalar_one()
+        keys = (
+            await session.execute(select(APIKey).where(APIKey.user_id == user.id))
+        ).scalars().all()
+        assert keys == []
+
+
+async def test_edge_mint_by_id_refuses_unverified_user(client):
+    user_id = await _register(client, "byid-unverified@example.com")
+    token = await _mint_service_token(ServiceClientRole.edge)
+
+    resp = await client.post(
+        f"/internal/users/{user_id}/chat-key",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403, resp.text
+
+
+async def test_edge_mints_chat_key_by_email_for_verified_user(client):
+    await _register(client, "verified-chatuser@example.com")
+    await _mark_verified("verified-chatuser@example.com")
+    token = await _mint_service_token(ServiceClientRole.edge)
+
+    resp = await client.post(
+        "/internal/users/by-email/chat-key",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"email": "verified-chatuser@example.com"},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -45,6 +93,7 @@ async def test_edge_mints_chat_key_by_email_for_unverified_user(client):
 
 async def test_edge_mints_chat_key_by_id(client):
     user_id = await _register(client, "byid@example.com")
+    await _mark_verified("byid@example.com")
     token = await _mint_service_token(ServiceClientRole.edge)
 
     resp = await client.post(
@@ -60,6 +109,7 @@ async def test_remint_rotates_prior_managed_key_in_place(client):
     # must rotate the existing row's secret rather than revoke-and-insert, or
     # every idle-then-resume session would leave a permanent extra row behind.
     await _register(client, "remint@example.com")
+    await _mark_verified("remint@example.com")
     token = await _mint_service_token(ServiceClientRole.edge)
     headers = {"Authorization": f"Bearer {token}"}
     body = {"email": "remint@example.com"}

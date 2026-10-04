@@ -145,6 +145,16 @@ unless the price ID in the env changes.
   put `current_period_start/end` on the subscription *item*. The allowance keys off
   the subscription itself, so a missing window falls back to the configured reset
   mode without downgrading the customer to the free tier.
+- **A test/e2e plan must never be reachable from production** (HYP-22). Never
+  point an e2e/smoke-test suite's `/admin/billing/plans` calls at a real
+  database — there is no automated cleanup for a plan created that way, and one
+  did leak into production this way (`e2e-test-plan` / `price_fake_e2e_123`,
+  found visible and active in `/billing/plans`). As defense in depth,
+  `looks_like_test_plan` (`app/billing/plans.py`) hides and deactivates any plan
+  whose slug/name contains "test"/"e2e" or whose Stripe price ID starts with
+  `price_fake`, in the public catalog, in checkout/plan-change, and in the admin
+  create/update/activate endpoints — but that only stops new leaks; an existing
+  bad row in a live database still needs deleting or deactivating by hand.
 
 ## Not wired up
 

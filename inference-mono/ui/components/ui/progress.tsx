@@ -22,7 +22,7 @@ export function Progress({
     <div
       className={cn(
         "h-1.5 w-full overflow-hidden rounded-sm border transition-colors duration-base ease-standard",
-        atLimit ? "border-border-strong bg-graphite" : "border-transparent bg-graphite",
+        atLimit ? "border-border-strong bg-border-strong" : "border-transparent bg-border",
         className
       )}
       role="progressbar"

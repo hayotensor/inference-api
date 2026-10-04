@@ -35,7 +35,9 @@
     ".next/types/**/*.ts",
     ".next-rizzo/types/**/*.ts",
     ".next-e2e/types/**/*.ts",
-    ".next-verify/types/**/*.ts"
+    ".next-verify/types/**/*.ts",
+    ".next-final-verify/types/**/*.ts",
+    ".next-hyp-dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

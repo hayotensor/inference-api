@@ -30,7 +30,10 @@ const badgeVariants = cva(
         outline: "border-border bg-transparent text-foreground",
         warning: "border-border-strong bg-transparent text-foreground",
         destructive: "border-foreground bg-transparent text-foreground",
-        success: "border-transparent bg-eggshell text-background"
+        // Eggshell is a fixed fill, not a themed one -- `text-void` (hardcoded)
+        // keeps it "Eggshell fill on Void Black" in both dark and light mode,
+        // where `text-background` would flip to Off-White and vanish.
+        success: "border-transparent bg-eggshell text-void"
       }
     },
     defaultVariants: {

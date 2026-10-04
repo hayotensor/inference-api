@@ -28,7 +28,25 @@ import {
   TableRow
 } from "@/components/ui/table";
 import { apiErrorMessage, usageApi } from "@/lib/api";
-import { formatDate, formatDateTime, formatNumber, formatPercent } from "@/lib/format";
+import {
+  formatDate,
+  formatDateTime,
+  formatMultiplier,
+  formatNumber,
+  formatPercent
+} from "@/lib/format";
+
+// A model's rate isn't on the wire for this aggregate (grouped-by-model) view --
+// only per-event usage carries `model_multiplier` -- so it's backed out from
+// the two figures that are: credits charged divided by raw tokens actually
+// used. That's the same number as the stored multiplier in the overwhelmingly
+// common case (a model's rate doesn't change mid-period), so it's shown as an
+// approximation ("~x2") rather than claimed as exact.
+function effectiveRate(chargedTokens: number, promptTokens: number, completionTokens: number) {
+  const raw = promptTokens + completionTokens;
+  if (raw <= 0) return null;
+  return chargedTokens / raw;
+}
 
 const MODELS_PAGE_SIZE = 20;
 
@@ -72,7 +90,7 @@ export default function UsagePage() {
     <>
       <DashboardPageHeader
         title="Usage"
-        description="Allowance and per-model token usage are authoritative backend responses."
+        description="Your allowance is spent in credits, not raw tokens. Every model has its own rate, so the same request can cost more or fewer credits depending on which model handles it."
         action={
           <Button
             onClick={() => recalculateMutation.mutate(false)}
@@ -95,19 +113,19 @@ export default function UsagePage() {
 
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard
-          label="Total allowance"
+          label="Credit allowance"
           value={formatNumber(usage?.total_allowance)}
           detail={usage ? `${formatDate(usage.period_start)} to ${formatDate(usage.period_end)}` : undefined}
           icon={BarChart3}
         />
         <StatCard
-          label="Used tokens"
+          label="Credits used"
           value={formatNumber(usage?.used_tokens)}
           detail={`${percent}% used`}
           icon={BarChart3}
         />
         <StatCard
-          label="Remaining tokens"
+          label="Credits remaining"
           value={formatNumber(usage?.remaining_tokens)}
           icon={BarChart3}
         />
@@ -116,7 +134,9 @@ export default function UsagePage() {
       <Card className="mt-6">
         <CardHeader>
           <CardTitle>Allowance breakdown</CardTitle>
-          <CardDescription>Displayed without client-side recomputation.</CardDescription>
+          <CardDescription>
+            All figures are credits -- displayed without client-side recomputation.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {allowanceQuery.isLoading ? <LoadingState /> : null}
@@ -141,9 +161,9 @@ export default function UsagePage() {
                     allowanceQuery.data.substrate_evm_native_balance_allowance
                   ],
                   ["Manual allowance", allowanceQuery.data.manual_adjustments],
-                  ["Total allowance", allowanceQuery.data.total_monthly_allowance],
-                  ["Used tokens", allowanceQuery.data.used_tokens],
-                  ["Remaining tokens", allowanceQuery.data.remaining_tokens]
+                  ["Total credit allowance", allowanceQuery.data.total_monthly_allowance],
+                  ["Credits used", allowanceQuery.data.used_tokens],
+                  ["Credits remaining", allowanceQuery.data.remaining_tokens]
                 ].map(([label, value]) => (
                   <div key={label} className="flex justify-between gap-4 text-sm">
                     <span className="text-muted-foreground">{label}</span>
@@ -160,8 +180,9 @@ export default function UsagePage() {
         <CardHeader>
           <CardTitle>Usage by model</CardTitle>
           <CardDescription>
-            One row per model. Token totals are summed across every request for that
-            model. Select a model to see its recent requests.
+            One row per model. Raw token totals are summed across every request for that
+            model; Rate is that model&apos;s credit multiplier, and Credits charged is what
+            actually came out of your allowance. Select a model to see its recent requests.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -184,37 +205,48 @@ export default function UsagePage() {
                     <TableHead>Requests</TableHead>
                     <TableHead>Prompt tokens</TableHead>
                     <TableHead>Completion tokens</TableHead>
-                    <TableHead>Charged tokens</TableHead>
+                    <TableHead>Rate</TableHead>
+                    <TableHead>Credits charged</TableHead>
                     <TableHead>Last used</TableHead>
                     <TableHead className="text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((row) => (
-                    <TableRow key={row.model}>
-                      <TableCell className="font-medium">
-                        <Link
-                          href={`/dashboard/usage/models/${encodeURIComponent(row.model)}`}
-                          className="hover:underline"
-                        >
-                          {row.model}
-                        </Link>
-                      </TableCell>
-                      <TableCell>{formatNumber(row.request_count)}</TableCell>
-                      <TableCell>{formatNumber(row.prompt_tokens)}</TableCell>
-                      <TableCell>{formatNumber(row.completion_tokens)}</TableCell>
-                      <TableCell>{formatNumber(row.charged_tokens)}</TableCell>
-                      <TableCell>{formatDateTime(row.last_used_at)}</TableCell>
-                      <TableCell className="text-right">
-                        <Button asChild variant="outline" size="sm">
-                          <Link href={`/dashboard/usage/models/${encodeURIComponent(row.model)}`}>
-                            <Eye />
-                            View
+                  {rows.map((row) => {
+                    const rate = effectiveRate(
+                      row.charged_tokens,
+                      row.prompt_tokens,
+                      row.completion_tokens
+                    );
+                    return (
+                      <TableRow key={row.model}>
+                        <TableCell className="font-medium">
+                          <Link
+                            href={`/dashboard/usage/models/${encodeURIComponent(row.model)}`}
+                            className="hover:underline"
+                          >
+                            {row.model}
                           </Link>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                        </TableCell>
+                        <TableCell>{formatNumber(row.request_count)}</TableCell>
+                        <TableCell>{formatNumber(row.prompt_tokens)}</TableCell>
+                        <TableCell>{formatNumber(row.completion_tokens)}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {rate === null ? "—" : `~${formatMultiplier(rate)}`}
+                        </TableCell>
+                        <TableCell>{formatNumber(row.charged_tokens)}</TableCell>
+                        <TableCell>{formatDateTime(row.last_used_at)}</TableCell>
+                        <TableCell className="text-right">
+                          <Button asChild variant="outline" size="sm">
+                            <Link href={`/dashboard/usage/models/${encodeURIComponent(row.model)}`}>
+                              <Eye />
+                              View
+                            </Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
               <AdminPagination

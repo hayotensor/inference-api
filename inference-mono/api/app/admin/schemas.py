@@ -88,6 +88,7 @@ class AdminAPIKeyRead(BaseModel):
     prefix: str
     last_four: str
     scopes: list[str]
+    allowed_models: list[str] | None = None
     rate_limit_per_minute: int
     created_at: datetime
     expires_at: datetime | None
@@ -109,6 +110,7 @@ class AdminAPIKeyUpdate(BaseModel):
     scopes: list[str] | None = None
     expires_at: datetime | None = None
     rate_limit_per_minute: int | None = Field(default=None, ge=1, le=60_000)
+    allowed_models: list[str] | None = None
 
 
 class AdminServiceClientCreate(BaseModel):

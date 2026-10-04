@@ -15,6 +15,20 @@ class UserService:
         self.user_manager = user_manager
 
     async def update_me(self, user: User, payload: UserUpdate, request: Request) -> User:
+        if payload.password is not None:
+            # `UserUpdate` inherits an optional `password` field from
+            # `fastapi_users.schemas.BaseUserUpdate`, and `UserManager.update()`
+            # would happily hash and set it -- with no proof the caller knows the
+            # *current* password, and without revoking the account's other
+            # sessions the way `change_password`/`reset_password` do. A merely
+            # still-live (e.g. stolen/XSS'd) access token would be enough to
+            # silently lock the real owner out. Route password changes through
+            # POST /auth/change-password instead, which checks both.
+            raise bad_request(
+                "use_change_password_endpoint",
+                "Changing your password requires your current password. "
+                "Use POST /auth/change-password instead.",
+            )
         if (
             payload.email is not None
             and payload.email.lower() != user.email.lower()

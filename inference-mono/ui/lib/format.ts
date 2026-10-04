@@ -56,11 +56,27 @@ export function formatDateTime(value: string | null | undefined) {
 export function formatRatePerMillion(
   cents: number | null | undefined,
   tokens: number | null | undefined,
-  currency: string | null | undefined = "usd"
+  currency: string | null | undefined = "usd",
+  unit: string = "tokens"
 ) {
   if (!cents || !tokens) return null;
   const perMillionCents = (cents / tokens) * 1_000_000;
-  return `${formatMoney(Math.round(perMillionCents), currency)} / million tokens`;
+  return `${formatMoney(Math.round(perMillionCents), currency)} / million ${unit}`;
+}
+
+// Renders a model's credit multiplier (e.g. the Decimal "2.0000" from the
+// wire) as a short "x2" / "x0.6" / "x10.5" factor -- trailing zeros dropped,
+// capped at 2 decimal places so odd Decimal precision doesn't leak into the
+// UI.
+export function formatMultiplier(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === "") return "—";
+  const numeric = typeof value === "string" ? Number(value) : value;
+  if (!Number.isFinite(numeric)) return "—";
+  const rounded = Math.round(numeric * 100) / 100;
+  const text = Number.isInteger(rounded)
+    ? String(rounded)
+    : rounded.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  return `×${text}`;
 }
 
 export function formatPercent(used: number, total: number) {

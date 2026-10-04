@@ -40,6 +40,9 @@ class APIKey(Base):
     last_four: Mapped[str] = mapped_column(String(4), nullable=False)
     hashed_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     scopes: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    # Optional model allowlist. NULL/empty = unrestricted (reaches every model);
+    # non-empty = the key may only be used against these model ids.
+    allowed_models: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     rate_limit_per_minute: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False

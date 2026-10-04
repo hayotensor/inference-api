@@ -66,7 +66,13 @@ from app.billing.schemas import CancelSubscriptionRequest
 from app.db.models.service_client import ServiceClientRole
 from app.db.session import get_async_session
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+# include_in_schema=False: this is the operator/back-office surface, not
+# part of the product API. Excluding it from the public OpenAPI schema (and
+# therefore from /docs and /redoc) hides its shape from anonymous callers.
+# This is purely a documentation-surface change -- every route here still
+# goes through require_admin_permission/current_admin_context, so an unauth
+# or under-privileged request is still rejected exactly as before.
+router = APIRouter(prefix="/admin", tags=["admin"], include_in_schema=False)
 
 
 @router.get("/me", response_model=AdminMeRead)

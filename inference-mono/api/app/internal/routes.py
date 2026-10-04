@@ -5,6 +5,13 @@ service token (``rk_…``) and MUST remain network-isolated (not routable from t
 public edge). The edge gateway uses them to obtain a per-user managed chat key so
 Open-WebUI traffic bills the right Talaris account through the unchanged
 ``/v1/chat/completions`` path.
+
+The ``edge`` service token authenticates the broker as a trusted *caller*, not
+the human behind the chat session — it is not a substitute for the normal
+verify gate. ``APIKeyService.mint_managed_chat_key`` enforces the same
+is_verified/phone/wallet check as the public ``POST /api-keys`` and returns a
+403 for an unverified user, which propagates unmodified from these routes
+(HYP-27).
 """
 
 from __future__ import annotations
@@ -25,7 +32,11 @@ from app.db.models.user import User
 from app.db.session import get_async_session
 from app.service_clients.dependencies import current_edge_client
 
-router = APIRouter(prefix="/internal", tags=["internal"])
+# include_in_schema=False: this is the trusted-edge-gateway-only surface
+# (service-token authenticated, network-isolated -- see module docstring),
+# not part of the public product API, so it must not show up in the public
+# OpenAPI schema / /docs / /redoc. current_edge_client auth is unchanged.
+router = APIRouter(prefix="/internal", tags=["internal"], include_in_schema=False)
 
 
 class ChatKeyByEmailRequest(BaseModel):

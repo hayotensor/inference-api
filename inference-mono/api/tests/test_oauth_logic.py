@@ -8,6 +8,7 @@ from app.auth.oauth import OAuthProfile, OAuthService, extract_oauth_profile, pa
 from app.auth.service import AuthService, UserManager
 from app.db.models.oauth_account import OAuthAccount
 from app.db.models.user import User
+from app.users.schemas import UserCreate
 from app.db.session import async_session_maker
 
 
@@ -96,6 +97,59 @@ async def test_oauth_unverified_email_is_rejected():
                 dummy_request(),
             )
         assert getattr(exc_info.value, "status_code", None) == 400
+
+
+async def test_oauth_login_verifies_a_pre_existing_unverified_email_account():
+    # Regression for: a user registers by email/password (is_verified=False,
+    # unconfirmed), never clicks the confirmation link, then signs in with
+    # Google using that same address. `_find_or_create_user` finds the
+    # existing row rather than creating a new one, and used to leave
+    # is_verified untouched -- Google's own verification of the address was
+    # discarded, and the account stayed "unverified" forever (this branch,
+    # once linked, is also the one every later login takes).
+    async with async_session_maker() as session:
+        user_db = SQLAlchemyUserDatabase(session, User, OAuthAccount)
+        user_manager = UserManager(user_db)
+        preexisting = await user_manager.create(
+            UserCreate(email="was-unverified@example.com", password="password123"),
+            safe=True,
+        )
+        assert preexisting.is_verified is False
+        await session.commit()
+
+        auth_service = AuthService(session, user_manager)
+        oauth_service = OAuthService(session, auth_service)
+        result = await oauth_service.login_or_create(
+            OAuthProfile(
+                provider="google",
+                account_id="google-heals-existing",
+                email="was-unverified@example.com",
+                email_verified=True,
+                full_name="Now OAuth",
+            ),
+            {"access_token": "google-token", "expires_at": 9999999999},
+            dummy_request(),
+        )
+        await session.commit()
+
+        assert result.user.is_verified is True
+        refreshed = await session.get(User, preexisting.id)
+        assert refreshed.is_verified is True
+
+        # And it stays fixed on a later, already-linked login too.
+        second_result = await oauth_service.login_or_create(
+            OAuthProfile(
+                provider="google",
+                account_id="google-heals-existing",
+                email="was-unverified@example.com",
+                email_verified=True,
+                full_name="Now OAuth",
+            ),
+            {"access_token": "google-token-2", "expires_at": 9999999999},
+            dummy_request(),
+        )
+        await session.commit()
+        assert second_result.user.is_verified is True
 
 
 async def test_oauth_unverified_existing_account_is_rejected():

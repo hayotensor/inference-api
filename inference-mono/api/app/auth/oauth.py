@@ -137,7 +137,31 @@ class OAuthService:
                 account_email=profile.email,
                 user_id=user.id,
             )
-            self.session.add(account)
+            # Appending (not just session.add) keeps `user.oauth_accounts` in
+            # sync in-memory -- the cascade on that relationship still adds
+            # `account` to the session. This matters because `user` is a
+            # freshly-created object here: without the append, the
+            # `UserRead.model_validate(user)` call below reads a still-empty
+            # `oauth_accounts` collection, so a brand-new Google sign-in's own
+            # login response reports `oauth_providers: []` and the frontend
+            # wrongly shows password-reset UI for a provider-integrated account.
+            user.oauth_accounts.append(account)
+
+        # `email_verified` was already required to be true above, on every
+        # path through this method (new user, first-time link to an
+        # existing account, or a returning already-linked login) -- so the
+        # provider vouches for this address regardless of which branch got
+        # here. `_find_or_create_user` only sets this for a brand-new user;
+        # an existing account (e.g. registered by email/password and never
+        # verified, then signed in with Google using the same address) fell
+        # through untouched, and once linked, every later login took the
+        # `account is not None` branch above which never touched it either
+        # -- so it never self-healed. Guard the write so an already-verified
+        # user doesn't take a needless UPDATE (and bump `updated_at`) on
+        # every login.
+        if not user.is_verified:
+            user.is_verified = True
+            self.session.add(user)
 
         access_token, refresh_token = await self.auth_service.issue_token_pair(user, request)
         await write_audit_log(
@@ -165,7 +189,8 @@ class OAuthService:
                 profile.email,
                 full_name=profile.full_name,
             )
-            user.is_verified = True
+            # is_verified is set once, uniformly for every path (new user,
+            # first link, or returning login), in login_or_create below.
             self.session.add(user)
         return user
 

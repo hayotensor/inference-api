@@ -21,7 +21,7 @@ import {
   TableRow
 } from "@/components/ui/table";
 import { usageApi } from "@/lib/api";
-import { formatDateTime, formatNumber } from "@/lib/format";
+import { formatDateTime, formatMultiplier, formatNumber } from "@/lib/format";
 
 const EVENTS_PAGE_SIZE = 25;
 
@@ -38,12 +38,16 @@ export default function UsageByModelDetailPage() {
 
   const summary = detailQuery.data?.summary;
   const events = detailQuery.data?.events ?? [];
+  // Events are returned most-recent-first, so the first event's stored
+  // multiplier is this model's current credit rate (it's on the wire per
+  // event, not on the aggregate summary).
+  const rateLabel = events.length > 0 ? formatMultiplier(events[0].model_multiplier) : null;
 
   return (
     <>
       <DashboardPageHeader
         title={model}
-        description="Token usage totals and recent requests for this model."
+        description="Raw token usage, this model's credit rate, and recent requests. Credits charged is what actually left your allowance."
         action={
           <Button asChild variant="outline">
             <Link href="/dashboard/usage">
@@ -77,9 +81,15 @@ export default function UsageByModelDetailPage() {
             icon={BarChart3}
           />
           <StatCard
-            label="Charged tokens"
+            label="Credits charged"
             value={formatNumber(summary.charged_tokens)}
-            detail={summary.last_used_at ? `Last used ${formatDateTime(summary.last_used_at)}` : undefined}
+            detail={
+              rateLabel
+                ? `${rateLabel} rate${summary.last_used_at ? ` · Last used ${formatDateTime(summary.last_used_at)}` : ""}`
+                : summary.last_used_at
+                  ? `Last used ${formatDateTime(summary.last_used_at)}`
+                  : undefined
+            }
             icon={BarChart3}
           />
         </div>
@@ -88,7 +98,10 @@ export default function UsageByModelDetailPage() {
       <Card className="mt-6">
         <CardHeader>
           <CardTitle>Recent requests</CardTitle>
-          <CardDescription>Most recent inference usage events for this model.</CardDescription>
+          <CardDescription>
+            Most recent inference usage events for this model. Rate is the credit
+            multiplier applied to that request&apos;s raw tokens.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {events.length === 0 && detailQuery.isSuccess ? (
@@ -105,7 +118,8 @@ export default function UsageByModelDetailPage() {
                     <TableHead>Request</TableHead>
                     <TableHead>Prompt tokens</TableHead>
                     <TableHead>Completion tokens</TableHead>
-                    <TableHead>Charged</TableHead>
+                    <TableHead>Rate</TableHead>
+                    <TableHead>Credits charged</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Created</TableHead>
                   </TableRow>
@@ -116,6 +130,9 @@ export default function UsageByModelDetailPage() {
                       <TableCell className="font-mono text-xs">{event.request_id}</TableCell>
                       <TableCell>{formatNumber(event.prompt_tokens)}</TableCell>
                       <TableCell>{formatNumber(event.completion_tokens)}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatMultiplier(event.model_multiplier)}
+                      </TableCell>
                       <TableCell>{formatNumber(event.charged_tokens)}</TableCell>
                       <TableCell>{event.status}</TableCell>
                       <TableCell>{formatDateTime(event.created_at)}</TableCell>
