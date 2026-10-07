@@ -1,9 +1,25 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 
-import { LegalPage, type LegalSection } from "@/components/legal-page";
+import { LegalBody, type LegalSection } from "@/components/legal-page";
+import {
+  AttestationDiagram,
+  CadenceDiagram,
+  ChatStorageDiagram,
+  EncryptionBoundaryDiagram,
+  EnclaveDiagram,
+  ReceiptDiagram,
+  RequestPathDiagram,
+  SealPinDiagram,
+  StorageDiagram
+} from "@/components/privacy-diagrams";
+import { PublicNav } from "@/components/public-nav";
+import { SiteFooter } from "@/components/site-footer";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy"
+  title: "Privacy",
+  description:
+    "How Talaris handles your prompts: trusted execution environments, remote attestation, what is and is not encrypted end to end, what we store, and how often we verify."
 };
 
 const SECTIONS: LegalSection[] = [
@@ -81,6 +97,417 @@ const SECTIONS: LegalSection[] = [
   }
 ];
 
+
+function Section({
+  id,
+  n,
+  title,
+  children
+}: {
+  id: string;
+  n: number;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section id={id} className="scroll-mt-24">
+      <p className="eyebrow">{String(n).padStart(2, "0")}</p>
+      <h2 className="mt-1 font-display text-xl font-medium text-foreground">{title}</h2>
+      <div className="mt-2 space-y-3">{children}</div>
+    </section>
+  );
+}
+
+function Code({ children }: { children: ReactNode }) {
+  return <code className="font-mono text-xs text-foreground">{children}</code>;
+}
+
+function Table({ head, rows }: { head: string[]; rows: ReactNode[][] }) {
+  return (
+    <div className="overflow-x-auto rounded-sm border border-border">
+      <table className="w-full border-collapse text-left text-xs">
+        <thead>
+          <tr className="border-b border-border-strong">
+            {head.map((h) => (
+              <th key={h} className="eyebrow px-3 py-2 font-medium">
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i} className="border-b border-border last:border-0 align-top">
+              {row.map((cell, j) => (
+                <td key={j} className={j === 0 ? "px-3 py-2 text-foreground" : "px-3 py-2"}>
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const TOC: Array<[string, string]> = [
+  ["summary", "The short version"],
+  ["request-path", "Request path"],
+  ["tee", "Trusted execution"],
+  ["attestation", "Remote attestation"],
+  ["sealing", "Sealed credentials and TLS pinning"],
+  ["receipts", "Signed receipts"],
+  ["encryption", "What is (and is not) end-to-end"],
+  ["storage", "What we store"],
+  ["cadence", "How often we attest"],
+  ["chat", "The chat app"],
+  ["limits", "Limits and caveats"],
+  ["policy", "Privacy Policy (legal text)"]
+];
+
 export default function PrivacyPage() {
-  return <LegalPage title="Privacy Policy" updated="October 2026" sections={SECTIONS} />;
+  return (
+    <div className="min-h-dvh bg-background">
+      <PublicNav />
+      <main className="page-shell max-w-3xl py-12">
+        <p className="eyebrow">Privacy</p>
+        <h1 className="mt-2 font-display text-[32px] font-medium leading-10 tracking-display">
+          How Talaris handles your data
+        </h1>
+        <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+          This page is for everyone, signed in or not. It describes, semi-technically, what
+          happens to a prompt on its way through the system, what is recorded, and just as
+          importantly what we do <em>not</em> claim. It is written against the source code of
+          the serving plane, the attestation verifier, the miner enclave wrapper and the
+          dashboard; function and field names are given so you can check them. The legal
+          Privacy Policy follows in <a href="#policy" className="focus-ring text-foreground underline underline-offset-4">section 12</a>.
+        </p>
+
+        <nav aria-label="On this page" className="mt-6 rounded-sm border border-border p-4">
+          <p className="eyebrow">On this page</p>
+          <ol className="mt-2 grid gap-x-6 gap-y-1 text-xs text-muted-foreground sm:grid-cols-2">
+            {TOC.map(([id, label], i) => (
+              <li key={id}>
+                <a href={`#${id}`} className="focus-ring hover:text-foreground">
+                  <span className="metadata text-xs">{String(i + 1).padStart(2, "0")}</span> {label}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+
+        <div className="mt-10 space-y-12 text-sm leading-relaxed text-muted-foreground">
+          <Section id="summary" n={1} title="The short version">
+            <Table
+              head={["Question", "Answer", "Detail"]}
+              rows={[
+                [
+                  "Is inference run in hardware-isolated enclaves?",
+                  "Yes, on the miner path",
+                  "Requests are routed only to miners whose enclave passed attestation (section 4). Production policy requires Intel TDX and NVIDIA GPU evidence."
+                ],
+                [
+                  "Is it end-to-end encrypted from my device to the enclave?",
+                  "No",
+                  "Two separately encrypted TLS hops meet at the Talaris API, which sees the plaintext (section 7)."
+                ],
+                [
+                  "Do you store prompts and responses?",
+                  "Not in the inference platform's database",
+                  "No table has a column for them. Metadata is stored (section 8). The chat app keeps history only where you choose (section 10)."
+                ],
+                [
+                  "Is every request attested?",
+                  "No",
+                  "Each enclave is attested at provisioning and re-attested on a schedule (default hourly). Each response carries a signed receipt naming that attested enclave (sections 6 and 9)."
+                ],
+                [
+                  "Can the miner operator read my prompt?",
+                  "Designed not to",
+                  "That is what the hardware guarantees, not something this code can prove by itself (sections 3 and 11)."
+                ]
+              ]}
+            />
+          </Section>
+
+          <Section id="request-path" n={2} title="Request path">
+            <RequestPathDiagram />
+            <p>
+              An API call (<Code>POST /v1/chat/completions</Code> or <Code>/v1/inference</Code>) reaches
+              the Talaris API over TLS. The API authenticates your key (stored only as a hash), checks
+              your model allowlist and rate limit, reserves token credit, and asks the miner selector
+              for candidates: miners that are attested, healthy, have the model loaded and hold an
+              active credential, ranked by free capacity, then queue depth, then a reputation the
+              platform computes from its own observed success rate (never a self-reported one).
+            </p>
+            <p>
+              The forwarder then opens a new TLS connection to the chosen enclave, pinned to the
+              certificate that enclave attested (section 5), and sends the request. If a miner fails,
+              the API tries the next candidate, up to three attempts by default. The reservation is
+              settled using the token counts the enclave reports, never an estimate.
+            </p>
+            <p>
+              Miners publish one address for many model enclaves through an SNI pass-through proxy
+              (HAProxy in TCP mode). It never terminates TLS and holds no key, so it can see which
+              hostname was contacted and when, but not request or response contents.
+            </p>
+            <p>
+              The signed-out homepage sandbox and the chat app use the same selection and forwarding
+              code. The chat app adds an edge hop that maps your login to a managed API key before
+              forwarding.
+            </p>
+          </Section>
+
+          <Section id="tee" n={3} title="Trusted execution">
+            <EnclaveDiagram />
+            <p>
+              Each model runs inside a single-model enclave: an Intel TDX confidential VM paired with
+              an NVIDIA confidential-computing GPU that the engine is pinned to, with no CPU fallback.
+              These technologies are designed so that the host operating system, hypervisor and the
+              machine&apos;s operator cannot read the memory of the VM or the GPU. The prompt, the
+              weights and the generated text exist in the clear only inside that boundary.
+            </p>
+            <p>
+              The enclave wrapper (<Code>tee_wrapper</Code>) generates fresh identity keys and a fresh
+              TLS certificate in memory at every boot and never reads one from disk. The inference
+              engine (vLLM or SGLang) runs behind it and is started with a measured launch
+              configuration, whose hash is part of what gets attested.
+            </p>
+            <p>
+              What the code does is <em>verify the hardware evidence</em>; the confidentiality
+              property itself is provided by the CPU and GPU vendors&apos; hardware, and our
+              guarantee is only as strong as theirs (section 11).
+            </p>
+          </Section>
+
+          <Section id="attestation" n={4} title="Remote attestation">
+            <AttestationDiagram />
+            <p>
+              Attestation is how the platform decides an enclave is genuine before trusting it with
+              anything. In <Code>ProvisionerService</Code> the platform generates a random 32-byte
+              nonce and calls the enclave&apos;s <Code>GET /attestation?nonce=</Code>. The enclave
+              answers with a document whose <Code>report_data</Code> is a hash (format v6) over: the
+              nonce, its enclave key fingerprint, its TLS key fingerprint, the hash of the loaded model
+              weights, the hash of the engine launch arguments, the hash of the GPU set, and the head
+              of its usage hash chain. That digest is carried inside a hardware-signed Intel TDX quote
+              and echoed in NVIDIA GPU evidence.
+            </p>
+            <p>
+              The shared verifier (<Code>talaris_attest.verify_attestation</Code>) then checks, each as
+              a separate pass/fail: the attestation mode, that the nonce echoes ours (freshness),
+              that <Code>report_data</Code> recomputes correctly, the NVIDIA evidence, the Intel quote
+              chain, that the attested GPUs are the ones pinned, that the model hash is on the
+              platform-signed allowlist, and that the TLS certificate is vouched for by the enclave
+              key. Every required check must pass; otherwise the miner is marked failed and receives
+              no traffic. Production defaults refuse the development mode in which an enclave merely
+              signs its own claim.
+            </p>
+            <p>
+              Validators on the subnet run their own, independent challenges: each epoch every
+              validator probes the same deterministic sample of miners with a fresh nonce, verifies the
+              result with the same verifier, and uses it as a pass/fail gate on rewards.
+            </p>
+          </Section>
+
+          <Section id="sealing" n={5} title="Sealed credentials and TLS pinning">
+            <SealPinDiagram />
+            <p>
+              Once an enclave verifies, the platform mints a fresh random credential and seals it to
+              the enclave&apos;s public key (a libsodium sealed box), signs the ciphertext with the
+              platform key, and posts it to <Code>/provision</Code>. Only the enclave&apos;s private
+              key, which never leaves it, can open it. That credential is the bearer token the
+              platform later uses to call the enclave; it is stored on the platform encrypted at rest
+              and replaced on each re-provisioning.
+            </p>
+            <p>
+              Enclaves use self-signed certificates, so trust does not come from a certificate
+              authority. It comes from the attestation: the fingerprint of the certificate is bound
+              into the hardware-signed report. On every forward the platform compares the SHA-256 of
+              the certificate actually presented against that attested fingerprint, and aborts the
+              connection on a mismatch (and marks the miner stale). Pinning is on by default.
+            </p>
+          </Section>
+
+          <Section id="receipts" n={6} title="Signed receipts">
+            <ReceiptDiagram />
+            <p>
+              A response served by an attested miner carries a receipt, in the <Code>attestation</Code>{" "}
+              field of <Code>/v1/inference</Code> and <Code>talaris_attestation</Code> on chat
+              completions. It names the request id, model, model hash, the enclave&apos;s verify key,
+              the TLS fingerprint, the attestation mode and the time that enclave was last
+              hardware-verified, signed with the same Ed25519 key that signs the model allowlist. You
+              fetch that public key from <Code>GET /attest</Code>, pin it, and verify with PyNaCl
+              alone.
+            </p>
+            <p>
+              Be precise about what this is: a platform-signed statement tying that response to a
+              previously verified enclave. It is <em>not</em> a fresh hardware quote for each request.
+              The receipt contains no prompt or response text.
+            </p>
+          </Section>
+
+          <Section id="encryption" n={7} title="What is (and is not) end-to-end">
+            <EncryptionBoundaryDiagram />
+            <p>
+              Your connection to Talaris is protected by TLS in transit, and the platform&apos;s
+              connection to the enclave is a second, separate, certificate-pinned TLS session. The
+              Talaris API decrypts your request to authenticate, meter and route it, and holds the
+              plaintext in memory while forwarding it. So the system is <strong>not</strong>{" "}
+              end-to-end encrypted between your device and the enclave, and we do not claim that it
+              is. What the design offers instead is that, past the API, plaintext exists only inside
+              attested hardware, and that the credential the platform uses to reach the enclave is
+              sealed so that only the enclave can open it.
+            </p>
+            <p>
+              If your threat model excludes the platform operator, you need to trust us to run the
+              published code. The signed, verifiable parts (receipts, allowlist, epoch statistics)
+              let you check what we claim about the miners; they do not remove the API from the trust
+              path.
+            </p>
+          </Section>
+
+          <Section id="storage" n={8} title="What we store, and what we do not">
+            <StorageDiagram />
+            <Table
+              head={["Where", "What is recorded"]}
+              rows={[
+                [
+                  "Account service",
+                  "Email, name, salted password hash, linked wallet addresses; hashed API keys. Account events such as sign-in and sign-out are audit-logged with IP address, user agent and request id."
+                ],
+                [
+                  "Usage ledger",
+                  "Per request: request id, user and key id, model, prompt and completion token counts, credit charged, serving miner and model hash, status and timestamps. Per API key: endpoint, method, status, token counts."
+                ],
+                [
+                  "Miner statistics",
+                  "Per forward attempt: miner, model, outcome, latency, time to first token, token counts, request id. No user identifier. Aggregated per epoch into a signed snapshot that validators score from."
+                ],
+                [
+                  "Enclave",
+                  "A local usage database: key id, model, endpoint, token counts, latency, status, request id, in a tamper-evident hash chain. Its code states it never persists request or response bodies."
+                ],
+                [
+                  "Free sandbox",
+                  "A per-browser id and your IP address are hashed with a secret key and used as daily counters in Redis. A log line records the request id, model, token counts and those hashes, not the raw values and not the prompt."
+                ]
+              ]}
+            />
+            <p>
+              Prompt and response text is held in memory to serve the request and is not written to
+              any of these tables. Server access logs are set to warnings only. Third-party
+              infrastructure in front of the service (such as a CDN or reverse proxy) is outside what
+              this code controls; see the legal policy for the processors we use.
+            </p>
+          </Section>
+
+          <Section id="cadence" n={9} title="How often we attest">
+            <CadenceDiagram />
+            <Table
+              head={["Check", "Who runs it", "When"]}
+              rows={[
+                [
+                  "Full hardware attestation of an enclave",
+                  "Talaris API (provisioner)",
+                  "At first registration, then whenever the attestation expires. Default lifetime is 1 hour (ATTESTATION_TTL_SECONDS), found by a scan every 60 seconds and a maintenance pass every 2 minutes. Also redone after a TLS pin mismatch or when a model is added."
+                ],
+                [
+                  "Fresh credential for the enclave",
+                  "Talaris API",
+                  "Each time an enclave is re-provisioned, so about hourly by default; tokens also expire after 24 hours."
+                ],
+                [
+                  "Independent challenge of miners",
+                  "Subnet validators",
+                  "Once per subnet epoch, on a deterministic sample of miners, with a fresh nonce."
+                ],
+                [
+                  "TLS certificate pin",
+                  "Talaris API",
+                  "On every connection to an enclave, that is, every request."
+                ],
+                [
+                  "Signed receipt",
+                  "Talaris API",
+                  "On every response served by a miner. This is a signature, not a new hardware quote."
+                ],
+                [
+                  "Signed model-list check in the dashboard",
+                  "Your browser, via this site's server",
+                  "When the dashboard loads and every 6 hours while it stays open; shown as stale after 24 hours. It verifies the platform-signed allowlist of approved model hashes against a key pinned in the site's configuration. It does not itself fetch hardware evidence from each miner."
+                ]
+              ]}
+            />
+            <p>
+              These intervals are the defaults in the code and are configurable by the operator. A
+              request is therefore not attested individually; it is served by an enclave whose
+              hardware attestation is at most about one lifetime old, with a pinned certificate and a
+              signed receipt on top.
+            </p>
+          </Section>
+
+          <Section id="chat" n={10} title="The chat app, search and the sandbox">
+            <ChatStorageDiagram />
+            <p>
+              The chat app is a rebranded Open-WebUI. By default new conversations are kept in your
+              browser&apos;s own storage and not on our servers. You can switch an account or a single
+              chat to account storage for multi-device access, and optionally encrypt chats with a
+              passphrase in the browser first; if you lose the passphrase those chats cannot be
+              recovered. The text of each message still passes through the Talaris API to reach a
+              model, exactly as in section 2.
+            </p>
+            <p>
+              Where web search is enabled, the search query is sent to a search provider
+              (DuckDuckGo, with Bing or Wikipedia as fallbacks) by a small proxy we run. Treat search
+              terms as leaving the attested boundary. The signed-out sandbox is capped per day per
+              browser and per network, and its requests are not billed to any account.
+            </p>
+          </Section>
+
+          <Section id="limits" n={11} title="Limits and caveats">
+            <ul className="list-disc space-y-2 pl-5">
+              <li>
+                Hardware attestation shows the enclave is genuine and running the expected model and
+                launch arguments. It is not a proof that the hardware has no flaw; TEEs have had
+                published side-channel and firmware vulnerabilities, and we depend on Intel and
+                NVIDIA for fixes.
+              </li>
+              <li>
+                A model hash with no existing pin is added to the allowlist the first time it is
+                hardware-verified (trust on first attestation). An operator-set pin is never
+                overridden.
+              </li>
+              <li>
+                Development builds can run with a mock attestation mode. Production defaults require
+                TDX and GPU evidence and reject it; if you are evaluating a non-production
+                deployment, the dashboard badge and the receipt&apos;s <Code>attestation_mode</Code>{" "}
+                field show what was actually verified.
+              </li>
+              <li>
+                A few parts of the verifier are documented in its source as unfinished production
+                wiring (for example pinning NVIDIA&apos;s endpoint details and Intel revocation-list
+                checks). They are being completed.
+              </li>
+              <li>
+                Metadata (who called, when, which model, how many tokens) is stored, as described in
+                section 8, and is what billing and miner scoring are built from.
+              </li>
+            </ul>
+          </Section>
+        </div>
+
+        <hr className="rule my-12" />
+
+        <section id="policy" className="scroll-mt-24">
+          <p className="eyebrow">12 / Legal</p>
+          <h2 className="mt-1 font-display text-[28px] font-medium leading-9 tracking-display">
+            Privacy Policy
+          </h2>
+          <LegalBody updated="October 2026" sections={SECTIONS} />
+        </section>
+      </main>
+      <SiteFooter />
+    </div>
+  );
 }

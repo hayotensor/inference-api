@@ -266,3 +266,134 @@
     letter-spacing: -0.01em;
   }
 }
+
+/* ---------------------------------------------------------------------
+   Privacy-page infographics (HYP-80). Hairline inline SVG: every stroke is
+   currentColor at 1px, motion is CSS-only, and meaning is carried by labels
+   and dash patterns -- never by colour. With prefers-reduced-motion every
+   animation is switched off and each diagram rests in a complete, readable
+   static state (animated parts are fully visible by default).
+   ------------------------------------------------------------------- */
+.pv-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  color: hsl(var(--foreground));
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pv-svg .pv-t {
+  fill: currentColor;
+  stroke: none;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, "Roboto Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+.pv-svg .pv-m {
+  fill: hsl(var(--muted-foreground));
+}
+.pv-svg .pv-faint {
+  stroke: hsl(var(--border-strong));
+}
+.pv-svg .pv-dot {
+  fill: currentColor;
+  stroke: none;
+}
+.pv-svg .pv-solid-fill {
+  fill: hsl(var(--background));
+}
+.pv-svg .pv-dash {
+  stroke-dasharray: 4 4;
+}
+.pv-svg .pv-flow {
+  stroke-dasharray: 3 5;
+  animation: pv-march 1.6s linear infinite;
+}
+.pv-svg .pv-travel {
+  animation: pv-travel var(--pv-dur, 3.2s) var(--pv-ease, linear) var(--pv-delay, 0s) infinite;
+}
+.pv-svg .pv-step {
+  animation: pv-step var(--pv-dur, 6s) steps(1, end) var(--pv-delay, 0s) infinite;
+}
+.pv-svg .pv-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pv-pulse 3.6s ease-in-out var(--pv-delay, 0s) infinite;
+}
+.pv-svg .pv-draw {
+  stroke-dasharray: var(--pv-len, 120);
+  animation: pv-draw var(--pv-dur, 4s) ease-in-out var(--pv-delay, 0s) infinite;
+}
+
+@keyframes pv-march {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+@keyframes pv-travel {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(var(--pv-dx, 100px));
+    opacity: 0;
+  }
+}
+/* Four-phase highlight: visible only during its own quarter of the loop. */
+@keyframes pv-step {
+  0% {
+    opacity: 1;
+  }
+  25% {
+    opacity: 0.25;
+  }
+  100% {
+    opacity: 0.25;
+  }
+}
+@keyframes pv-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.04);
+    opacity: 0.55;
+  }
+}
+@keyframes pv-draw {
+  0% {
+    stroke-dashoffset: var(--pv-len, 120);
+  }
+  45%,
+  85% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: calc(var(--pv-len, 120) * -1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pv-svg .pv-flow,
+  .pv-svg .pv-travel,
+  .pv-svg .pv-step,
+  .pv-svg .pv-pulse,
+  .pv-svg .pv-draw {
+    animation: none;
+  }
+  .pv-svg .pv-travel {
+    opacity: 1;
+  }
+}

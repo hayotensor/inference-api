@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Loader2, ShieldCheck } from "lucide-react";
+import { ArrowRight, Loader2, MessageSquare, ShieldCheck } from "lucide-react";
 
 import { PublicNav } from "@/components/public-nav";
 import { SiteFooter } from "@/components/site-footer";
@@ -193,12 +193,22 @@ export default function HomePage() {
 
               <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                 {isAuthenticated ? (
-                  <Button size="lg" asChild>
-                    <Link href="/dashboard">
-                      Go to dashboard
-                      <ArrowRight strokeWidth={1.5} />
-                    </Link>
-                  </Button>
+                  <>
+                    <Button size="lg" asChild>
+                      <Link href="/dashboard">
+                        Go to dashboard
+                        <ArrowRight strokeWidth={1.5} />
+                      </Link>
+                    </Button>
+                    {/* HYP-79: same (primary) button style, to the right of the dashboard button.
+                        Plain anchor: the chat app is served outside the Next router. */}
+                    <Button size="lg" asChild>
+                      <a href={buildChatPromptUrl("")}>
+                        Chat
+                        <MessageSquare strokeWidth={1.5} />
+                      </a>
+                    </Button>
+                  </>
                 ) : (
                   <Button size="lg" asChild>
                     <Link href="/signup">

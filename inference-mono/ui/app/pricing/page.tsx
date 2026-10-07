@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/card";
 import { apiErrorMessage, billingApi, redirectToStripeSession } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { planTierCopy } from "@/lib/plan-features";
 import { formatMoney, formatNumber, formatRatePerMillion } from "@/lib/format";
 import {
   annualSavingsPercent,
@@ -87,7 +88,7 @@ export default function PricingPage() {
         ) : null}
 
         {plansQuery.data ? (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             {plans.map((plan) => (
               <PlanCard
                 key={plan.id}
@@ -134,6 +135,18 @@ function PlanCard({
     "credits"
   );
 
+  const tier = planTierCopy(plan);
+  const creditsLine = plan.is_unlimited
+    ? "Unlimited credits"
+    : `${formatNumber(plan.monthly_token_allowance)} credits / month`;
+  const features = tier
+    ? [...(tier.inherits ? [`Everything in ${tier.inherits}`] : []), creditsLine, ...tier.adds]
+    : [
+        creditsLine,
+        "OpenAI-compatible API + usage dashboard",
+        `${String(plan.features?.support ?? "community")} support`
+      ];
+
   return (
     <Card className={plan.name === "Pro" ? "border-primary" : ""}>
       <CardHeader>
@@ -165,18 +178,12 @@ function PlanCard({
         </div>
 
         <ul className="space-y-2 text-sm text-muted-foreground">
-          <li className="flex gap-2">
-            <Check className="mt-0.5 h-4 w-4 shrink-0 text-foreground" strokeWidth={1.5} />
-            {plan.is_unlimited ? "Unlimited credits" : `${formatNumber(plan.monthly_token_allowance)} credits / month`}
-          </li>
-          <li className="flex gap-2">
-            <Check className="mt-0.5 h-4 w-4 shrink-0 text-foreground" strokeWidth={1.5} />
-            OpenAI-compatible API + usage dashboard
-          </li>
-          <li className="flex gap-2">
-            <Check className="mt-0.5 h-4 w-4 shrink-0 text-foreground" strokeWidth={1.5} />
-            {String(plan.features?.support ?? "community")} support
-          </li>
+          {features.map((feature) => (
+            <li key={feature} className="flex gap-2">
+              <Check className="mt-0.5 h-4 w-4 shrink-0 text-foreground" strokeWidth={1.5} />
+              {feature}
+            </li>
+          ))}
         </ul>
 
         {isFree ? (
