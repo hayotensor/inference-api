@@ -208,9 +208,9 @@ export default function PrivacyPage() {
                   "Requests are routed only to miners whose enclave passed attestation (section 4). Production policy requires Intel TDX and NVIDIA GPU evidence."
                 ],
                 [
-                  "Is it end-to-end encrypted from my device to the enclave?",
-                  "No",
-                  "Two separately encrypted TLS hops meet at the Talaris API, which sees the plaintext (section 7)."
+                  "Is my data encrypted on the way to the enclave?",
+                  "Yes, on every hop",
+                  "TLS from your device to the Talaris API, then a second certificate-pinned TLS session from the API to the attested enclave. Past the API, plaintext exists only inside attested hardware. The API itself handles plaintext in memory to authenticate, meter and route your request, so this is hop-by-hop rather than a single device-to-enclave session (section 7)."
                 ],
                 [
                   "Do you store prompts and responses?",
@@ -218,9 +218,9 @@ export default function PrivacyPage() {
                   "No table has a column for them. Metadata is stored (section 8). The chat app keeps history only where you choose (section 10)."
                 ],
                 [
-                  "Is every request attested?",
-                  "No",
-                  "Each enclave is attested at provisioning and re-attested on a schedule (default hourly). Each response carries a signed receipt naming that attested enclave (sections 6 and 9)."
+                  "Is every request served by an attested node?",
+                  "Yes",
+                  "Requests only go to nodes with a current, passing hardware attestation (re-done about every hour by default). On every request we also verify the node's pinned TLS certificate against the attested fingerprint, and each response carries a signed receipt naming that attested node. A fresh hardware quote is not fetched per request (sections 6 and 9)."
                 ],
                 [
                   "Can the miner operator read my prompt?",
@@ -353,11 +353,11 @@ export default function PrivacyPage() {
               Your connection to Talaris is protected by TLS in transit, and the platform&apos;s
               connection to the enclave is a second, separate, certificate-pinned TLS session. The
               Talaris API decrypts your request to authenticate, meter and route it, and holds the
-              plaintext in memory while forwarding it. So the system is <strong>not</strong>{" "}
-              end-to-end encrypted between your device and the enclave, and we do not claim that it
-              is. What the design offers instead is that, past the API, plaintext exists only inside
-              attested hardware, and that the credential the platform uses to reach the enclave is
-              sealed so that only the enclave can open it.
+              plaintext in memory while forwarding it. So encryption is hop-by-hop: it is{" "}
+              <strong>not</strong> a single end-to-end session between your device and the enclave.
+              What the design guarantees is that every hop is encrypted, that past the API
+              plaintext exists only inside attested hardware, and that the credential the platform
+              uses to reach the enclave is sealed so that only the enclave can open it.
             </p>
             <p>
               If your threat model excludes the platform operator, you need to trust us to run the
@@ -404,6 +404,18 @@ export default function PrivacyPage() {
 
           <Section id="cadence" n={9} title="How often we attest">
             <CadenceDiagram />
+            <div className="grid gap-3 sm:grid-cols-3">
+              {[
+                ["Every request", "TLS certificate pin check and a signed receipt. No new hardware quote."],
+                ["About every hour", "Full hardware attestation of each node (default 1 hour, operator-configurable)."],
+                ["Every subnet epoch", "Independent validator challenge of a sample of miners, with a fresh nonce."]
+              ].map(([when, what]) => (
+                <div key={when} className="rounded-sm border border-border p-4">
+                  <p className="eyebrow text-foreground">{when}</p>
+                  <p className="mt-2 text-xs leading-relaxed">{what}</p>
+                </div>
+              ))}
+            </div>
             <Table
               head={["Check", "Who runs it", "When"]}
               rows={[

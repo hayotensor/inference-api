@@ -106,21 +106,23 @@ export default function HomePage() {
                     there is text, muted-and-disabled when empty). Colours are
                     the same ramp stops the chat app's custom.css maps its gray
                     scale onto. */}
-                <div className="mt-2 flex w-full flex-col rounded-3xl border border-[#1a1a1d] bg-[rgba(138,138,147,0.05)] px-1 transition hover:border-[#2a2a2f] focus-within:border-[#2a2a2f] [.light_&]:border-[#ede8e7] [.light_&]:bg-[rgba(247,246,244,0.9)] [.light_&]:hover:border-[#d9d6d4] [.light_&]:focus-within:border-[#d9d6d4]">
-                  <textarea
-                    id="home-prompt"
-                    value={prompt}
-                    onChange={(event) => setPrompt(event.target.value)}
-                    onKeyDown={handlePromptKeyDown}
-                    placeholder={
-                      isAuthenticated
-                        ? "Ask anything. Opens in a new chat tab. Press Enter there to send."
-                        : "Try the free sandbox. A few requests a day, no account needed."
-                    }
-                    rows={2}
-                    className="scrollbar-hidden max-h-80 w-full resize-none bg-transparent px-1 pb-[5px] pt-2.5 text-base text-foreground outline-none placeholder:text-[#686872]"
-                  />
-                  <div className="mx-0.5 mb-2.5 mt-0.5 flex items-center justify-end px-2.5">
+                <div className="relative mt-2 flex w-full flex-1 flex-col rounded-3xl border border-[#1a1a1d] bg-[rgba(138,138,147,0.05)] px-1 shadow-lg transition hover:border-[#2a2a2f] focus-within:border-[#2a2a2f] [.light_&]:border-[#ede8e7] [.light_&]:bg-[rgba(247,246,244,0.9)] [.light_&]:hover:border-[#d9d6d4] [.light_&]:focus-within:border-[#d9d6d4]">
+                  <div className="px-2.5">
+                    <textarea
+                      id="home-prompt"
+                      value={prompt}
+                      onChange={(event) => setPrompt(event.target.value)}
+                      onKeyDown={handlePromptKeyDown}
+                      placeholder={
+                        isAuthenticated
+                          ? "Ask anything. Opens in a new chat tab. Press Enter there to send."
+                          : "Try the free sandbox. A few requests a day, no account needed."
+                      }
+                      rows={2}
+                      className="scrollbar-hidden h-fit max-h-80 w-full resize-none overflow-auto bg-transparent px-1 pb-[9px] pt-3.5 text-base leading-7 text-foreground outline-none placeholder:text-[#686872]"
+                    />
+                  </div>
+                  <div className="mx-0.5 mb-2.5 mt-0.5 flex max-w-full items-center justify-end">
                     <button
                       type="submit"
                       aria-label="Send message"
@@ -145,11 +147,11 @@ export default function HomePage() {
                     </button>
                   </div>
                 </div>
-                <p className="metadata mt-2 text-xs">
-                  {isAuthenticated
-                    ? "Opens the chat app in a new tab with this prompt ready to send. Nothing is sent until you press Enter there."
-                    : "Free sandbox: a small number of short, capped-model replies per day, right on this page. Sign up for full access."}
-                </p>
+                {!isAuthenticated ? (
+                  <p className="metadata mt-2 text-xs">
+                    Free sandbox: a small number of short, capped-model replies per day, right on this page. Sign up for full access.
+                  </p>
+                ) : null}
 
                 {!isAuthenticated && sandbox.status !== "idle" ? (
                   <Card className="mt-4">
