@@ -82,8 +82,8 @@ export default function HomePage() {
       <PublicNav />
       <main>
         <section className="bg-background">
-          <div className="page-shell flex min-h-[calc(100dvh-4rem)] items-center py-12">
-            <div className="max-w-2xl">
+          <div className="page-shell f lex min-h-[calc(100dvh-4rem)] items-center py-12">
+            <div className="max-w-full">
               <div className="mb-6 inline-flex items-center gap-2 rounded-sm border border-border px-3 py-1.5 text-[11px] font-medium uppercase tracking-label text-muted-foreground">
                 <ShieldCheck className="h-3.5 w-3.5 text-foreground" strokeWidth={1.5} />
                 Secure auth, billing, usage, and wallet verification
@@ -95,12 +95,12 @@ export default function HomePage() {
                 <br />
                 Inference with receipts.
               </h1>
-              <p className="mt-6 max-w-xl text-lg leading-8 text-muted-foreground">
+              <p className="mt-6 max-w-full text-lg leading-8 text-muted-foreground">
                 Manage access, subscriptions, credit usage, wallet verification, and demo
                 inference from one console.
               </p>
 
-              <form onSubmit={handlePromptSubmit} className="mt-8 max-w-xl">
+              <form onSubmit={handlePromptSubmit} className="mt-8 max-w-full">
                 <Label htmlFor="home-prompt">Ask something</Label>
                 {/* Mirrors Open-WebUI's MessageInput composer (HYP-68): one
                     rounded-3xl surface, borderless transparent textarea on top,

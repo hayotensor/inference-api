@@ -243,7 +243,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               <div className="mt-3 flex gap-2">
                 <Button
                   variant="outline"
-                  size="md"
                   className="flex-1 justify-start"
                   onClick={() => setLogoutConfirmOpen(true)}
                 >
