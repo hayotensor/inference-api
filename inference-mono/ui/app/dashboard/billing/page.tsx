@@ -328,9 +328,9 @@ export default function BillingPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Wallet</CardTitle>
+            <CardTitle>Pay-as-you-go</CardTitle>
             <CardDescription>
-              Pay-as-you-go credits. Once the plan&apos;s allowance for the period runs
+              Once the plan&apos;s allowance for the period runs
               out, usage draws from this balance instead of being blocked.
             </CardDescription>
           </CardHeader>
@@ -340,14 +340,13 @@ export default function BillingPage() {
             {walletBalanceQuery.data ? (
               <div className="space-y-4 text-sm">
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-muted-foreground">Balance</span>
+                  <span className="text-muted-foreground">Credits</span>
                   <span className="text-2xl font-semibold tracking-normal">
                     {formatNumber(walletBalanceQuery.data.balance_tokens)}
-                    <span className="text-sm font-normal text-muted-foreground"> tokens</span>
                   </span>
                 </div>
                 <div className="space-y-2">
-                  <span className="text-muted-foreground">Top up</span>
+                  <span className="text-muted-foreground font-bold">Top up</span>
                   {walletBundlesQuery.isLoading ? <LoadingState /> : null}
                   {walletBundlesQuery.isError ? <ErrorState error={walletBundlesQuery.error} /> : null}
                   <div className="grid gap-2 sm:grid-cols-2">

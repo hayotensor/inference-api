@@ -187,34 +187,49 @@ function IncidentRow({ incident }: { incident: StatusIncident }) {
 
 function UptimeBar({ history, uptime }: { history: StatusHistoryDay[]; uptime: number | null }) {
   return (
-    <div className="w-full">
-      <div className="flex h-8 items-stretch gap-[2px]" role="img" aria-label="Daily uptime history">
-        {history.map((d) => (
-          <div
-            key={d.day}
-            title={
-              d.status === null
-                ? `${d.day}: no data`
-                : `${d.day}: ${STATUS_COPY[d.status].label}, ${((d.uptime ?? 0) * 100).toFixed(1)}% up`
-            }
-            // Weight ladder, not traffic lights: solid = operational,
-            // half-tone = degraded, hollow outline = down, faint = no data.
-            className={
-              d.status === "operational"
-                ? "flex-1 rounded-[1px] bg-foreground"
-                : d.status === "degraded"
-                  ? "flex-1 rounded-[1px] bg-foreground/50"
-                  : d.status === "down"
-                    ? "flex-1 rounded-[1px] border border-foreground"
-                    : "flex-1 rounded-[1px] bg-border"
-            }
-          />
-        ))}
-      </div>
-      <div className="mt-1 flex justify-between text-[11px] text-muted-foreground">
-        <span>{history.length} days ago</span>
-        <span>{uptime === null ? "No data yet" : `${(uptime * 100).toFixed(2)}% uptime`}</span>
-        <span>Today</span>
+    <div className="w-full overflow-x-auto">
+      <div className="min-w-max">
+        <svg
+          className="block"
+          width={Math.max(0, history.length * 5 - 2)}
+          height={32}
+          role="img"
+          aria-label="Daily uptime history"
+        >
+          {history.map((d, index) => (
+            <rect
+              key={d.day}
+              // Inset the outage stroke so every tick paints the same 3 × 32px footprint.
+              x={index * 5 + (d.status === "down" ? 0.5 : 0)}
+              y={d.status === "down" ? 0.5 : 0}
+              width={d.status === "down" ? 2 : 3}
+              height={d.status === "down" ? 31 : 32}
+              strokeWidth={1}
+              // Weight ladder, not traffic lights: solid = operational,
+              // half-tone = degraded, hollow outline = down, faint = no data.
+              className={
+                d.status === "operational"
+                  ? "fill-foreground"
+                  : d.status === "degraded"
+                    ? "fill-foreground/50"
+                    : d.status === "down"
+                      ? "fill-none stroke-foreground"
+                      : "fill-border"
+              }
+            >
+              <title>
+                {d.status === null
+                  ? `${d.day}: no data`
+                  : `${d.day}: ${STATUS_COPY[d.status].label}, ${((d.uptime ?? 0) * 100).toFixed(1)}% up`}
+              </title>
+            </rect>
+          ))}
+        </svg>
+        <div className="mt-1 flex justify-between text-[11px] text-muted-foreground">
+          <span>{history.length} days ago</span>
+          <span>{uptime === null ? "No data yet" : `${(uptime * 100).toFixed(2)}% uptime`}</span>
+          <span>Today</span>
+        </div>
       </div>
     </div>
   );
