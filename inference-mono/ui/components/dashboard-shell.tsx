@@ -28,6 +28,7 @@ import { PageLoadingState } from "@/components/loading-spinner";
 import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
 import { AuthGate, useAuth } from "@/lib/auth";
+import { AttestationProvider } from "@/lib/attestation";
 import { navPathMatches, usePendingNavPath } from "@/lib/pending-nav";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -222,6 +223,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthGate requireAuth>
+      <AttestationProvider>
       <div className="min-h-dvh bg-background">
         {/* One step of tone off the page (Onyx-on-Void in dark, white-on-Off-White
             in light), with a single hairline doing the partitioning -- `bg-card`
@@ -294,6 +296,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           void logout();
         }}
       />
+      </AttestationProvider>
     </AuthGate>
   );
 }

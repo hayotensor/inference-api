@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 
-import "@rainbow-me/rainbowkit/styles.css";
 import "@/app/globals.css";
 import { Providers } from "@/app/providers";
 import { inter, sora } from "@/brand/fonts";

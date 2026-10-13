@@ -1,6 +1,5 @@
 "use client";
 
-import * as React from "react";
 import { ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 
 import {
@@ -12,13 +11,10 @@ import {
   DialogTrigger
 } from "@/components/ui/dialog";
 import { formatDateTime } from "@/lib/format";
-import type { AttestationStatusResponse } from "@/lib/types";
+import { useAttestation } from "@/lib/attestation";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
-// Re-check every few hours (HYP-37: "run it every few hours ... show people
-// who won't do it themselves that it is provably private"), plus once on
-// mount so a freshly loaded page never sits at "checking" for hours.
-const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 // A stored "verified" result older than this is shown as stale rather than
 // green -- e.g. the tab has been open a long time and the interval was
 // throttled/suspended by the browser in a background tab.
@@ -106,29 +102,9 @@ function reasonSentence(reason: string | undefined): string {
  * hover tooltip, which is easy to miss and unusable on touch devices.
  */
 export function AttestationBadge() {
-  const [status, setStatus] = React.useState<DisplayStatus>("checking");
-  const [checkedAt, setCheckedAt] = React.useState<Date | null>(null);
-  const [result, setResult] = React.useState<AttestationStatusResponse | null>(null);
-
-  const check = React.useCallback(async () => {
-    try {
-      const res = await fetch("/api/attestation-status", { cache: "no-store" });
-      const data = (await res.json()) as AttestationStatusResponse;
-      setResult(data);
-      setCheckedAt(new Date(data.checkedAt));
-      setStatus(data.status === "verified" ? "verified" : "unverified");
-    } catch {
-      setResult({ status: "unverified", checkedAt: new Date().toISOString(), reason: "error" });
-      setStatus("unverified");
-      setCheckedAt(new Date());
-    }
-  }, []);
-
-  React.useEffect(() => {
-    void check();
-    const id = setInterval(() => void check(), RECHECK_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [check]);
+  const { data: result, refetch, isFetching } = useAttestation();
+  const checkedAt = result ? new Date(result.checkedAt) : null;
+  const status: DisplayStatus = !result ? "checking" : result.status === "verified" ? "verified" : "unverified";
 
   const effective: DisplayStatus =
     status === "verified" &&
@@ -245,6 +221,9 @@ export function AttestationBadge() {
             </div>
           ) : null}
           <p>Automatically re-checked every 6 hours while this page is open.</p>
+          <Button variant="outline" disabled={isFetching} onClick={() => void refetch({ cancelRefetch: false })}>
+            {isFetching ? "Checking…" : "Check now"}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

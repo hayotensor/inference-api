@@ -1,14 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight, Loader2, WalletCards } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { useAccount, useSignMessage } from "wagmi";
+import { useWallet } from "@/lib/wallet";
 import { z } from "zod";
 
 import { AuthFormShell } from "@/components/auth-form-shell";
@@ -32,8 +31,7 @@ type LoginForm = z.infer<typeof loginSchema>;
 export default function LoginPage() {
   const router = useRouter();
   const { setTokenResponse, ensureSsoCookie } = useAuth();
-  const { address } = useAccount();
-  const { signMessageAsync } = useSignMessage();
+  const { address, signMessageAsync, openWallet, loading: walletLoading } = useWallet();
   const form = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: "", password: "" }
@@ -154,18 +152,14 @@ export default function LoginPage() {
               Sign in with wallet ({shortenAddress(address)})
             </Button>
           ) : (
-            <ConnectButton.Custom>
-              {({ openConnectModal, mounted }) => (
-                <Button
-                  variant="outline"
-                  onClick={openConnectModal}
-                  disabled={UI_DEMO_MODE || !mounted}
-                >
-                  <WalletCards />
-                  Sign in with wallet
-                </Button>
-              )}
-            </ConnectButton.Custom>
+            <Button
+              variant="outline"
+              onClick={openWallet}
+              disabled={UI_DEMO_MODE || walletLoading}
+            >
+              {walletLoading ? <Loader2 className="animate-spin" /> : <WalletCards />}
+              Sign in with wallet
+            </Button>
           )}
         </div>
 

@@ -11,7 +11,7 @@ import {
   WalletCards
 } from "lucide-react";
 import { toast } from "sonner";
-import { useAccount, useSignMessage } from "wagmi";
+import { useWallet } from "@/lib/wallet";
 
 import { DashboardPageHeader } from "@/components/dashboard-shell";
 import { ErrorState, LoadingState } from "@/components/data-state";
@@ -39,8 +39,7 @@ import type { EvmWallet } from "@/lib/types";
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
-  const { address: connectedAddress, isConnected } = useAccount();
-  const { signMessageAsync } = useSignMessage();
+  const { address: connectedAddress, isConnected, signMessageAsync } = useWallet();
 
   const usageQuery = useQuery({
     queryKey: ["usage-current"],

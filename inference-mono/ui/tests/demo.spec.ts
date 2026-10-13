@@ -191,6 +191,11 @@ test("demo wallet configuration cannot read or write the normal wallet store", a
     .rejects.toThrow("Blockchain connections are disabled");
 });
 
+test("demo refuses to load the wallet SDK", async () => {
+  const { loadWalletRuntime } = require("../lib/wallet-loader") as typeof import("../lib/wallet-loader");
+  await expect(loadWalletRuntime()).rejects.toThrow("Wallet connections are disabled");
+});
+
 test("demo chat and build outputs stay isolated with real services configured", async () => {
   const config = loadNextConfig({
     NODE_ENV: "development", NEXT_PUBLIC_UI_DEMO: "true", NEXT_DIST_DIR: ".next", NEXT_PUBLIC_CHAT_URL: "https://chat.example.com"

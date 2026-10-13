@@ -7,6 +7,7 @@
     "dev": "next dev",
     "dev:demo": "NEXT_PUBLIC_UI_DEMO=true NEXT_TELEMETRY_DISABLED=1 next dev",
     "test:demo": "NODE_ENV=development NEXT_PUBLIC_UI_DEMO=true PLAYWRIGHT_FORCE_ASYNC_LOADER=1 playwright test --config=playwright.demo.config.ts",
+    "test:browser": "PLAYWRIGHT_FORCE_ASYNC_LOADER=1 playwright test --config=playwright.browser.config.ts",
     "build": "next build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"

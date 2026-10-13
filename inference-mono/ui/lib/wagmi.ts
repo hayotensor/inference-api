@@ -60,5 +60,6 @@ export const wagmiConfig = projectId
           ? custom({ request: async () => { throw new Error("Blockchain connections are disabled in the local UI demo."); } }, { retryCount: 0 })
           : http()
       },
-      ssr: true
+      // A storage-free demo store has no persist.rehydrate method.
+      ssr: !UI_DEMO_MODE
     });

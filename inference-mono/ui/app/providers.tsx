@@ -2,16 +2,12 @@
 
 import * as React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { RainbowKitProvider } from "@rainbow-me/rainbowkit";
-import { WagmiProvider } from "wagmi";
 import { Toaster } from "sonner";
 
 import { AuthProvider } from "@/lib/auth";
 import { DemoBanner } from "@/components/demo-banner";
-import { UI_DEMO_MODE } from "@/lib/demo-mode";
-import { rainbowKitDarkTheme, rainbowKitLightTheme } from "@/lib/rainbowkit-theme";
 import { ThemeProvider, useTheme } from "@/lib/theme";
-import { wagmiConfig } from "@/lib/wagmi";
+import { WalletProvider } from "@/lib/wallet";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = React.useState(
@@ -36,31 +32,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeProvider>
-      {/* WagmiProvider outside QueryClientProvider (wagmi v2 uses tanstack query
-          internally too) -- sharing the one QueryClient is the documented setup,
-          not two competing caches. */}
-      <WagmiProvider config={wagmiConfig} reconnectOnMount={!UI_DEMO_MODE}>
-        <QueryClientProvider client={queryClient}>
-          <ThemedRainbowKitProvider>
-            <AuthProvider>{children}</AuthProvider>
-            <DemoBanner />
-            <ThemedToaster />
-          </ThemedRainbowKitProvider>
-        </QueryClientProvider>
-      </WagmiProvider>
+      <QueryClientProvider client={queryClient}>
+        <WalletProvider>
+          <AuthProvider>{children}</AuthProvider>
+          <DemoBanner />
+          <ThemedToaster />
+        </WalletProvider>
+      </QueryClientProvider>
     </ThemeProvider>
-  );
-}
-
-// Split out so it can read the theme via context and hand RainbowKit's modal
-// the matching brand palette (see lib/rainbowkit-theme.ts) instead of its
-// default blue.
-function ThemedRainbowKitProvider({ children }: { children: React.ReactNode }) {
-  const { theme } = useTheme();
-  return (
-    <RainbowKitProvider theme={theme === "dark" ? rainbowKitDarkTheme : rainbowKitLightTheme}>
-      {children}
-    </RainbowKitProvider>
   );
 }
 

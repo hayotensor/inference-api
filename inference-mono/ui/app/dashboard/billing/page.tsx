@@ -61,9 +61,18 @@ export default function BillingPage() {
   });
 
   const portalMutation = useMutation({
-    mutationFn: billingApi.portal,
-    onSuccess: redirectToStripeSession,
-    onError: (error) => toast.error(apiErrorMessage(error))
+    mutationFn: async (portalWindow: Window) => {
+      const response = await billingApi.portal();
+      const url = response.url ?? response.checkout_url ?? response.session_url ?? response.portal_url;
+      if (!url) {
+        throw new Error("The API did not return a Stripe redirect URL.");
+      }
+      portalWindow.location.replace(url);
+    },
+    onError: (error, portalWindow) => {
+      portalWindow.close();
+      toast.error(apiErrorMessage(error));
+    }
   });
   const checkoutMutation = useMutation({
     mutationFn: ({ planId, interval: checkoutInterval }: { planId: string; interval: BillingInterval }) =>
@@ -163,7 +172,16 @@ export default function BillingPage() {
                 ))}
                 <div className="grid gap-2 pt-2 sm:grid-cols-2">
                   <Button
-                    onClick={() => portalMutation.mutate()}
+                    onClick={() => {
+                      // Open during the click so the async request does not trigger popup blocking.
+                      const portalWindow = window.open("about:blank", "_blank");
+                      if (!portalWindow) {
+                        toast.error("Allow popups to open the customer portal in a new tab.");
+                        return;
+                      }
+                      portalWindow.opener = null;
+                      portalMutation.mutate(portalWindow);
+                    }}
                     disabled={portalMutation.isPending}
                   >
                     {portalMutation.isPending ? (

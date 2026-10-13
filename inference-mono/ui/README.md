@@ -36,6 +36,11 @@ directory, with `tsconfig.demo.json` for generated types. Normal typechecks and
 Docker builds exclude this demo output. Demo wallet state is not persisted,
 and demo server routes cannot set or clear real SSO cookies or call the backend.
 Chat controls, blockchain RPC, and Stripe redirects are disabled in demo mode.
+The demo build excludes the wallet SDK entirely. In normal mode, wallet code
+and styles load on the first wallet-button click; an existing wallet connection
+is restored at that point. Dashboard data and navigation do not wait for it.
+Desktop and mobile attestation badges share one check and a six-hour refresh
+timer, with a manual **Check now** action in the details dialog.
 The demo command also disables Next.js telemetry. Stop it and use `pnpm dev`
 to return to the normal backend-connected UI. Do not put the demo flag in a production environment: it is development-only,
 and the build rejects it when enabled.
@@ -47,6 +52,20 @@ pnpm test:demo
 pnpm typecheck
 pnpm lint
 ```
+
+Browser regression checks attach to an already-running UI and use isolated
+browser sessions. With `pnpm dev:demo` running on port 3001:
+
+```bash
+PLAYWRIGHT_BASE_URL=http://localhost:3001 pnpm test:browser
+```
+
+For a normal development or production server, set `PLAYWRIGHT_UI_MODE=normal`
+and point `PLAYWRIGHT_BASE_URL` at its local address. These checks mock the
+backend and inject a simulated wallet; they do not use real accounts or sign
+with a real wallet. They cover deferred SDK loading, wallet login/linking and
+disconnection. Demo checks cover SDK exclusion, runtime errors, storage
+isolation, and shared attestation polling/refresh.
 
 ### With the backend
 

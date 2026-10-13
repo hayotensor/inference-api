@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, RefreshCw, Trash2, WalletCards } from "lucide-react";
 import { toast } from "sonner";
-import { useAccount, useSignMessage } from "wagmi";
+import { useWallet } from "@/lib/wallet";
 
 import { DashboardPageHeader } from "@/components/dashboard-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
@@ -32,8 +32,7 @@ import type { BalanceSyncResponse } from "@/lib/types";
 
 export default function WalletPage() {
   const queryClient = useQueryClient();
-  const { address, isConnected } = useAccount();
-  const { signMessageAsync } = useSignMessage();
+  const { address, isConnected, signMessageAsync } = useWallet();
 
   const walletQuery = useQuery({
     queryKey: ["wallet-evm"],
