@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { UI_DEMO_MODE } from "@/lib/demo-mode";
 
 // Server-side: the browser's SSO cookie must be httpOnly so the edge Worker (not
 // JS) reads it. This handler exchanges the caller's access token for a signed SSO
@@ -34,6 +35,9 @@ function cookieOptions(maxAge: number) {
 }
 
 export async function POST(request: NextRequest) {
+  // Cookies are shared across localhost ports. Demo must neither mint nor
+  // expire the SSO cookie used by a normal UI running alongside it.
+  if (UI_DEMO_MODE) return new NextResponse(null, { status: 204 });
   const authorization = request.headers.get("authorization");
   if (!authorization) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -54,6 +58,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE() {
+  if (UI_DEMO_MODE) return new NextResponse(null, { status: 204 });
   const response = new NextResponse(null, { status: 204 });
   response.cookies.set({ ...cookieOptions(0), value: "" });
   if (COOKIE_DOMAIN) {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { buildStatusPage, ensureSampler } from "@/lib/server/status-history";
+import { UI_DEMO_MODE } from "@/lib/demo-mode";
 
 export const runtime = "nodejs";
 // A status page should never serve a stale cached snapshot.
@@ -14,6 +15,10 @@ export const dynamic = "force-dynamic";
  * (idempotent) and returns the rollup.
  */
 export async function GET() {
+  if (UI_DEMO_MODE) {
+    const { statusPage } = await import("@/lib/demo/fixtures");
+    return NextResponse.json(statusPage);
+  }
   await ensureSampler();
   return NextResponse.json(buildStatusPage());
 }

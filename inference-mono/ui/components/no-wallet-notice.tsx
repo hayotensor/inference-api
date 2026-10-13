@@ -4,6 +4,7 @@ import * as React from "react";
 import { TriangleAlert } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { UI_DEMO_MODE } from "@/lib/demo-mode";
 
 /**
  * HYP-51: RainbowKit's connect modal already knows whether an extension
@@ -29,6 +30,7 @@ export function NoWalletNotice({ className }: { className?: string }) {
   const [hasInjectedWallet, setHasInjectedWallet] = React.useState<boolean | null>(null);
 
   React.useEffect(() => {
+    if (UI_DEMO_MODE) return;
     if (typeof window === "undefined") return;
 
     const legacyInjected = Boolean((window as unknown as { ethereum?: unknown }).ethereum);
@@ -59,7 +61,7 @@ export function NoWalletNotice({ className }: { className?: string }) {
     };
   }, []);
 
-  if (hasInjectedWallet !== false) return null;
+  if (UI_DEMO_MODE || hasInjectedWallet !== false) return null;
 
   return (
     <div

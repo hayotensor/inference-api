@@ -7,6 +7,8 @@ import { WagmiProvider } from "wagmi";
 import { Toaster } from "sonner";
 
 import { AuthProvider } from "@/lib/auth";
+import { DemoBanner } from "@/components/demo-banner";
+import { UI_DEMO_MODE } from "@/lib/demo-mode";
 import { rainbowKitDarkTheme, rainbowKitLightTheme } from "@/lib/rainbowkit-theme";
 import { ThemeProvider, useTheme } from "@/lib/theme";
 import { wagmiConfig } from "@/lib/wagmi";
@@ -37,10 +39,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
       {/* WagmiProvider outside QueryClientProvider (wagmi v2 uses tanstack query
           internally too) -- sharing the one QueryClient is the documented setup,
           not two competing caches. */}
-      <WagmiProvider config={wagmiConfig}>
+      <WagmiProvider config={wagmiConfig} reconnectOnMount={!UI_DEMO_MODE}>
         <QueryClientProvider client={queryClient}>
           <ThemedRainbowKitProvider>
             <AuthProvider>{children}</AuthProvider>
+            <DemoBanner />
             <ThemedToaster />
           </ThemedRainbowKitProvider>
         </QueryClientProvider>

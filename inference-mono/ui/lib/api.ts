@@ -1,4 +1,5 @@
 import { authStore, tokenResponseToSession } from "@/lib/auth-store";
+import { UI_DEMO_MODE } from "@/lib/demo-mode";
 import type {
   ApiErrorDetail,
   AdminApiKeysResponse,
@@ -191,6 +192,21 @@ export async function apiRequest<T>(
     baseUrl
   }: RequestOptions = {}
 ): Promise<T> {
+  if (UI_DEMO_MODE) {
+    signal?.throwIfAborted();
+    if (auth && !authStore.accessToken()) {
+      throw new ApiError(401, "Authentication required.", "unauthorized");
+    }
+    const { demoRequest, DemoError } = await import("@/lib/demo/api");
+    signal?.throwIfAborted();
+    try {
+      return demoRequest(path, method, body) as T;
+    } catch (error) {
+      if (error instanceof DemoError) throw new ApiError(error.status, error.message, "demo");
+      throw error;
+    }
+  }
+
   const requestHeaders = new Headers(headers);
   if (body !== undefined) {
     requestHeaders.set("Content-Type", "application/json");
@@ -274,6 +290,7 @@ export function isVerificationRequiredError(error: unknown) {
  * edge Worker can identify this user when routing to /chat. Best-effort.
  */
 export async function syncSsoCookie() {
+  if (UI_DEMO_MODE) return;
   if (typeof window === "undefined") return;
   const token = await accessTokenForAuthenticatedRequest();
   if (!token) return;
@@ -284,6 +301,7 @@ export async function syncSsoCookie() {
 }
 
 export async function clearSsoCookie() {
+  if (UI_DEMO_MODE) return;
   if (typeof window === "undefined") return;
   await fetch("/api/sso-cookie", { method: "DELETE" }).catch(() => {});
 }
@@ -352,6 +370,7 @@ export const authApi = {
     });
   },
   oauthLoginUrl(provider: "google" | "apple") {
+    if (UI_DEMO_MODE) return "/login";
     return buildUrl(`/auth/${provider}/login`);
   },
   oauthCallback(provider: "google" | "apple", search: string) {
@@ -941,6 +960,9 @@ export const guestApi = {
 };
 
 export function redirectToStripeSession(response: StripeSessionResponse) {
+  if (UI_DEMO_MODE) {
+    throw new ApiError(501, "Stripe connections are disabled in the local UI demo.", "demo");
+  }
   const url =
     response.url ??
     response.checkout_url ??

@@ -30,6 +30,7 @@ import { AuthGate, useAuth } from "@/lib/auth";
 import { navPathMatches, usePendingNavPath } from "@/lib/pending-nav";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { UI_DEMO_MODE } from "@/lib/demo-mode";
 
 /**
  * Dark/light toggle. Icon-only and unlabeled by the kit's nav conventions --
@@ -92,6 +93,10 @@ function ChatButton({
     },
     [ensureSsoCookie]
   );
+
+  if (UI_DEMO_MODE) {
+    return <Button size="sm" className={className} disabled title="Chat is unavailable in the local demo">Chat</Button>;
+  }
 
   return (
     <Button

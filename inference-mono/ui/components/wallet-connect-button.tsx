@@ -4,6 +4,7 @@ import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { WalletCards } from "lucide-react";
 
 import { Button, type ButtonProps } from "@/components/ui/button";
+import { UI_DEMO_MODE } from "@/lib/demo-mode";
 
 /**
  * RainbowKit's stock `<ConnectButton />` ships its own pill-shaped, blue/
@@ -17,6 +18,9 @@ export function WalletConnectButton({
   size,
   className
 }: Pick<ButtonProps, "size" | "className"> = {}) {
+  if (UI_DEMO_MODE) {
+    return <Button size={size} className={className} disabled>Wallet connection unavailable in demo</Button>;
+  }
   return (
     <ConnectButton.Custom>
       {({ account, chain, openAccountModal, openChainModal, openConnectModal, mounted }) => {

@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { PageLoadingState } from "@/components/loading-spinner";
 import { apiErrorMessage, authApi, clearSsoCookie, syncSsoCookie, userApi } from "@/lib/api";
 import { authStore, tokenResponseToSession } from "@/lib/auth-store";
+import { UI_DEMO_MODE } from "@/lib/demo-mode";
 import type { AuthSession, TokenResponse, User } from "@/lib/types";
 
 type AuthContextValue = {
@@ -44,7 +45,7 @@ export function safeNextPath(raw: string | null | undefined, fallback = "/dashbo
     // already allows it.
     const nextOrigin = new URL(raw).origin;
     const chatOrigin = new URL(CHAT_URL).origin;
-    if (nextOrigin === chatOrigin) return raw;
+    if (!UI_DEMO_MODE && nextOrigin === chatOrigin) return raw;
   } catch {
     // `raw` isn't an absolute URL, or CHAT_URL isn't one to compare against.
   }

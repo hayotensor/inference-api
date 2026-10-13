@@ -1,8 +1,9 @@
 "use client";
 
 import type { AuthSession, TokenResponse, User } from "@/lib/types";
+import { UI_DEMO_MODE } from "@/lib/demo-mode";
 
-const STORAGE_KEY = "inference-api.auth.v1";
+const STORAGE_KEY = UI_DEMO_MODE ? "inference-api.demo-auth.v1" : "inference-api.auth.v1";
 let memorySession: AuthSession | null = null;
 
 function isBrowser() {

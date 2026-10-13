@@ -5,6 +5,11 @@
 // unset and this redirect disappears.
 const chatUrl = process.env.NEXT_PUBLIC_CHAT_URL;
 const chatIsExternal = Boolean(chatUrl && /^https?:\/\//.test(chatUrl));
+const uiDemoMode = process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_UI_DEMO === "true";
+
+if (process.env.NEXT_PUBLIC_UI_DEMO === "true" && process.env.NODE_ENV === "production") {
+  throw new Error("UI demo mode is for local development only. Unset NEXT_PUBLIC_UI_DEMO before building.");
+}
 
 const nextConfig = {
   reactStrictMode: true,
@@ -15,7 +20,9 @@ const nextConfig = {
   // (Docker or otherwise) always use Next's standard `.next` output — a build that
   // writes to a custom distDir but gets started assuming `.next` is how a host ends
   // up silently falling back to a stale/dev server.
-  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
+  ...(uiDemoMode
+    ? { distDir: ".next-demo", typescript: { tsconfigPath: "tsconfig.demo.json" } }
+    : process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
   // wagmi's connector bundle pulls in optional peers neither MetaMask's SDK
   // (React Native storage) nor WalletConnect's logger (pretty-printing) need
   // in a browser bundle -- webpack still tries to resolve them and warns.
@@ -33,6 +40,7 @@ const nextConfig = {
     return config;
   },
   async redirects() {
+    if (uiDemoMode) return [{ source: '/chat/:path*', destination: '/dashboard', permanent: false }];
     if (!chatIsExternal) return [];
     const base = chatUrl.replace(/\/$/, '');
     return [

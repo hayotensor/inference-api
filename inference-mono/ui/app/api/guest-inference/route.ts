@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { UI_DEMO_MODE } from "@/lib/demo-mode";
 
 // Same INTERNAL_*_BASE_URL / NEXT_PUBLIC_*_BASE_URL fallback pattern as
 // app/api/status/route.ts / app/api/attestation-status/route.ts -- the
@@ -54,6 +55,9 @@ function resolveVisitorIp(request: Request): string | null {
  * happens server-side on the inference-api, never here.
  */
 export async function POST(request: Request) {
+  if (UI_DEMO_MODE) {
+    return jsonError(501, "local_demo", "Inference is unavailable in the local UI demo.");
+  }
   const guestId = request.headers.get("x-guest-id");
   if (!guestId) {
     return jsonError(

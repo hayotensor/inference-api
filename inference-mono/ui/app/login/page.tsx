@@ -20,6 +20,7 @@ import { Separator } from "@/components/ui/separator";
 import { apiErrorMessage, authApi } from "@/lib/api";
 import { AuthGate, navigateAfterAuth, safeNextPath, useAuth } from "@/lib/auth";
 import { shortenAddress } from "@/lib/format";
+import { DEMO_EMAIL, DEMO_PASSWORD, UI_DEMO_MODE } from "@/lib/demo-mode";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -84,6 +85,18 @@ export default function LoginPage() {
           </>
         }
       >
+        {UI_DEMO_MODE ? (
+          <div className="mb-5 space-y-2 rounded-lg border p-4">
+            <p className="text-sm text-muted-foreground">Explore the dashboard and admin screens with sample data.</p>
+            <Button
+              className="w-full"
+              disabled={mutation.isPending}
+              onClick={() => mutation.mutate({ email: DEMO_EMAIL, password: DEMO_PASSWORD })}
+            >
+              Enter local demo
+            </Button>
+          </div>
+        ) : null}
         <form
           className="space-y-4"
           onSubmit={form.handleSubmit((values) => mutation.mutate(values))}
@@ -120,14 +133,18 @@ export default function LoginPage() {
         </div>
 
         <div className="grid gap-2">
-          <Button variant="outline" asChild>
-            <a href={authApi.oauthLoginUrl("google")}>Continue with Google</a>
-          </Button>
+          {UI_DEMO_MODE ? (
+            <Button variant="outline" disabled>Google sign-in unavailable in demo</Button>
+          ) : (
+            <Button variant="outline" asChild>
+              <a href={authApi.oauthLoginUrl("google")}>Continue with Google</a>
+            </Button>
+          )}
           {address ? (
             <Button
               variant="outline"
               onClick={() => walletLoginMutation.mutate()}
-              disabled={walletLoginMutation.isPending}
+              disabled={UI_DEMO_MODE || walletLoginMutation.isPending}
             >
               {walletLoginMutation.isPending ? (
                 <Loader2 className="animate-spin" />
@@ -142,7 +159,7 @@ export default function LoginPage() {
                 <Button
                   variant="outline"
                   onClick={openConnectModal}
-                  disabled={!mounted}
+                  disabled={UI_DEMO_MODE || !mounted}
                 >
                   <WalletCards />
                   Sign in with wallet

@@ -1,5 +1,6 @@
 .env.local
 .next/
+.next-demo/
 node_modules/
 .pnpm-store/
 .turbo/

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { UI_DEMO_MODE } from "@/lib/demo-mode";
 
 import {
   canonicalAllowlistMessage,
@@ -47,6 +48,10 @@ const PINNED_PLATFORM_PUBKEY = process.env.PLATFORM_PUBKEY?.trim().toLowerCase()
  */
 export async function GET() {
   const checkedAt = new Date().toISOString();
+
+  if (UI_DEMO_MODE) {
+    return NextResponse.json<AttestationStatusResponse>({ status: "unverified", checkedAt, reason: "local_demo" });
+  }
 
   if (!PINNED_PLATFORM_PUBKEY) {
     // Fail closed: with no independently configured pin, there is nothing to

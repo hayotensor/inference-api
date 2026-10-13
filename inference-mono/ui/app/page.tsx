@@ -13,6 +13,7 @@ import { ApiError, apiErrorMessage, guestApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { buildChatPromptUrl } from "@/lib/chat-prompt";
 import { getOrCreateGuestId } from "@/lib/guest-id";
+import { UI_DEMO_MODE } from "@/lib/demo-mode";
 
 /**
  * The homepage's anonymous sandbox result (HYP-67). Signed-out visitors get a
@@ -35,6 +36,7 @@ export default function HomePage() {
 
   async function handlePromptSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (UI_DEMO_MODE) return;
     const trimmed = prompt.trim();
     if (!trimmed) return;
 
@@ -114,7 +116,9 @@ export default function HomePage() {
                       onChange={(event) => setPrompt(event.target.value)}
                       onKeyDown={handlePromptKeyDown}
                       placeholder={
-                        isAuthenticated
+                        UI_DEMO_MODE
+                          ? "Chat and inference are unavailable in the local demo."
+                          : isAuthenticated
                           ? "Ask anything. Opens in a new chat tab. Press Enter there to send."
                           : "Try the free sandbox. A few requests a day, no account needed."
                       }
@@ -126,9 +130,9 @@ export default function HomePage() {
                     <button
                       type="submit"
                       aria-label="Send message"
-                      disabled={!prompt.trim() || sandbox.status === "loading"}
+                      disabled={UI_DEMO_MODE || !prompt.trim() || sandbox.status === "loading"}
                       className={
-                        prompt.trim() && sandbox.status !== "loading"
+                        !UI_DEMO_MODE && prompt.trim() && sandbox.status !== "loading"
                           ? "self-center rounded-full bg-[#f7f6f4] p-1.5 text-[#0a0a0b] transition hover:bg-[#ede8e7] [.light_&]:bg-[#0a0a0b] [.light_&]:text-[#f7f6f4] [.light_&]:hover:bg-[#111113]"
                           : "disabled self-center rounded-full bg-[#35353b] p-1.5 text-[#0a0a0b] transition [.light_&]:bg-[#d9d6d4] [.light_&]:text-[#f7f6f4]"
                       }
@@ -192,37 +196,6 @@ export default function HomePage() {
                   </Card>
                 ) : null}
               </form>
-
-              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                {isAuthenticated ? (
-                  <>
-                    <Button size="lg" asChild>
-                      <Link href="/dashboard">
-                        Go to dashboard
-                        <ArrowRight strokeWidth={1.5} />
-                      </Link>
-                    </Button>
-                    {/* HYP-79: same (primary) button style, to the right of the dashboard button.
-                        Plain anchor: the chat app is served outside the Next router. */}
-                    <Button size="lg" asChild>
-                      <a href={buildChatPromptUrl("")}>
-                        Chat
-                        <MessageSquare strokeWidth={1.5} />
-                      </a>
-                    </Button>
-                  </>
-                ) : (
-                  <Button size="lg" asChild>
-                    <Link href="/signup">
-                      Create account
-                      <ArrowRight strokeWidth={1.5} />
-                    </Link>
-                  </Button>
-                )}
-                <Button size="lg" variant="outline" asChild>
-                  <Link href="/pricing">View pricing</Link>
-                </Button>
-              </div>
             </div>
           </div>
         </section>

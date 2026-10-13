@@ -1,11 +1,12 @@
 import { connectorsForWallets, getDefaultConfig } from "@rainbow-me/rainbowkit";
 import { injectedWallet } from "@rainbow-me/rainbowkit/wallets";
-import { createConfig, http } from "wagmi";
+import { createConfig, custom, http } from "wagmi";
 import { mainnet } from "wagmi/chains";
+import { UI_DEMO_MODE } from "@/lib/demo-mode";
 
-const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "";
+const projectId = UI_DEMO_MODE ? "" : process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "";
 
-if (!projectId && typeof window !== "undefined") {
+if (!UI_DEMO_MODE && !projectId && typeof window !== "undefined") {
   // eslint-disable-next-line no-console
   console.warn(
     "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is unset -- falling back to browser-extension " +
@@ -46,10 +47,18 @@ export const wagmiConfig = projectId
     })
   : createConfig({
       chains: [mainnet],
-      connectors: connectorsForWallets([{ groupName: "Installed", wallets: [injectedWallet] }], {
+      // Disabling connectors alone still lets wagmi hydrate/write its normal
+      // localStorage entry. Demo must leave the real wallet session alone.
+      ...(UI_DEMO_MODE ? { storage: null } : {}),
+      multiInjectedProviderDiscovery: !UI_DEMO_MODE,
+      connectors: UI_DEMO_MODE ? [] : connectorsForWallets([{ groupName: "Installed", wallets: [injectedWallet] }], {
         appName: "Talaris",
         projectId: ""
       }),
-      transports: { [mainnet.id]: http() },
+      transports: {
+        [mainnet.id]: UI_DEMO_MODE
+          ? custom({ request: async () => { throw new Error("Blockchain connections are disabled in the local UI demo."); } }, { retryCount: 0 })
+          : http()
+      },
       ssr: true
     });

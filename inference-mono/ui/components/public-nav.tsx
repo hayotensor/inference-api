@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, LayoutDashboard, Moon, Sun } from "lucide-react";
+import { ArrowRight, LayoutDashboard, MessageSquare, Moon, Sun } from "lucide-react";
 
 import { AppLogo } from "@/components/app-logo";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
+import { buildChatPromptUrl } from "@/lib/chat-prompt";
+import { UI_DEMO_MODE } from "@/lib/demo-mode";
 
 /**
  * Dark/light toggle for the public (signed-out) pages. Mirrors the one in
@@ -56,6 +58,16 @@ export function PublicNav() {
                   Dashboard
                 </Link>
               </Button>
+              {UI_DEMO_MODE ? (
+                <Button size="sm" disabled title="Chat is unavailable in the local demo">Chat</Button>
+              ) : (
+                <Button size="sm" asChild>
+                  <a href={buildChatPromptUrl("")}>
+                    Chat
+                    <MessageSquare strokeWidth={1.5} />
+                  </a>
+                </Button>
+              )}
               <ThemeToggle />
             </>
           ) : (

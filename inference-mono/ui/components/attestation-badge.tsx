@@ -71,6 +71,7 @@ const DISPLAY: Record<
 // Translate each one into a sentence someone who isn't reading this repo's
 // source can actually act on or understand.
 const REASON_COPY: Record<string, string> = {
+  local_demo: "Attestation is not checked in the local UI demo.",
   pin_not_configured:
     "This deployment has no PLATFORM_PUBKEY configured, so there is nothing independent to check the inference API's claimed signing key against. Set PLATFORM_PUBKEY to the same value pinned by subnet validators and TEEs -- see .env.example.",
   fetch_failed:

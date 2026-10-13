@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { UI_DEMO_MODE } from "@/lib/demo-mode";
 
 import type {
   ModelServiceStatus,
@@ -212,6 +213,7 @@ async function sampleOnce() {
 
 /** Idempotent: loads persisted history and starts the background sampler. */
 export async function ensureSampler() {
+  if (UI_DEMO_MODE) return;
   await load();
   if (!state.timer) {
     state.timer = setInterval(() => void sampleOnce(), SAMPLE_INTERVAL_MS);
