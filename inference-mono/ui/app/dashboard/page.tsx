@@ -95,7 +95,7 @@ export default function DashboardPage() {
     <>
       <DashboardPageHeader
         title="Overview"
-        description="Account state loaded directly from the FastAPI API."
+        description="Your account overview."
         action={
           <Button variant="outline" onClick={() => void usageQuery.refetch()}>
             <RefreshCw />

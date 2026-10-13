@@ -41,14 +41,14 @@ export function PublicNav() {
     <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-[8px]">
       <div className="page-shell flex h-16 items-center justify-between">
         <AppLogo />
-        <nav className="hidden items-center gap-8 sm:flex">
+        {/* <nav className="hidden items-center gap-8 sm:flex">
           <Link
             href="/pricing"
             className="focus-ring text-[11px] font-medium uppercase tracking-label text-muted-foreground transition-colors duration-fast ease-standard hover:text-foreground"
           >
             Pricing
           </Link>
-        </nav>
+        </nav> */}
         <div className="flex items-center gap-2">
           {isAuthenticated ? (
             <>
@@ -59,7 +59,10 @@ export function PublicNav() {
                 </Link>
               </Button>
               {UI_DEMO_MODE ? (
-                <Button size="sm" disabled title="Chat is unavailable in the local demo">Chat</Button>
+                <Button size="sm" disabled title="Chat is unavailable in the local demo">
+                  Chat
+                  <MessageSquare strokeWidth={1.5} />
+                </Button>
               ) : (
                 <Button size="sm" asChild>
                   <a href={buildChatPromptUrl("")}>

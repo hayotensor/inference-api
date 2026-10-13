@@ -12,6 +12,7 @@ import {
   KeyRound,
   LayoutDashboard,
   LogOut,
+  MessageSquare,
   MessagesSquare,
   Moon,
   Settings,
@@ -95,7 +96,7 @@ function ChatButton({
   );
 
   if (UI_DEMO_MODE) {
-    return <Button size="sm" className={className} disabled title="Chat is unavailable in the local demo">Chat</Button>;
+    return <Button size="sm" className={className} disabled title="Chat is unavailable in the local demo">Chat<MessageSquare strokeWidth={1.5} /></Button>;
   }
 
   return (
@@ -242,7 +243,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               <div className="mt-3 flex gap-2">
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="md"
                   className="flex-1 justify-start"
                   onClick={() => setLogoutConfirmOpen(true)}
                 >
