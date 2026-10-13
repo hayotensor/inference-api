@@ -261,7 +261,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           {/* Desktop-only top bar: the sidebar carries logo/account chrome, so this
               strip exists solely to put Chat top-right, per HYP-52. */}
           <div className="pointer-events-auto sticky top-0 z-20 hidden items-center justify-end border-b border-border bg-background/85 px-6 py-3 backdrop-blur-[8px] lg:flex">
-            <ChatButton ensureSsoCookie={ensureSsoCookie} />
+            <div className="flex justify-end dashboard-nav">
+              <ChatButton ensureSsoCookie={ensureSsoCookie} />
+            </div>
           </div>
           <header className="pointer-events-auto sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur-[8px] lg:hidden">
             <div className="flex h-16 items-center justify-between gap-2 px-4">

@@ -86,7 +86,7 @@ export default function HomePage() {
             <div className="max-w-full">
               <div className="mb-6 inline-flex items-center gap-2 rounded-sm border border-border px-3 py-1.5 text-[11px] font-medium uppercase tracking-label text-muted-foreground">
                 <ShieldCheck className="h-3.5 w-3.5 text-foreground" strokeWidth={1.5} />
-                Secure auth, billing, usage, and wallet verification
+                Private AI
               </div>
               {/* Display headline: Sora Light at the kit's display size, short
                   period-terminated sentences, one headline per surface. */}
@@ -101,7 +101,7 @@ export default function HomePage() {
               </p>
 
               <form onSubmit={handlePromptSubmit} className="mt-8 max-w-full">
-                <Label htmlFor="home-prompt">Ask something</Label>
+                <Label htmlFor="home-prompt">Ask anything</Label>
                 {/* Mirrors Open-WebUI's MessageInput composer (HYP-68): one
                     rounded-3xl surface, borderless transparent textarea on top,
                     and a round arrow-up send button bottom-right (filled when

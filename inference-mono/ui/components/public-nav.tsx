@@ -55,7 +55,7 @@ const resourceLinks: NavLink[] = [
 ];
 
 const navTriggerClassName =
-  "group focus-ring inline-flex h-10 items-center justify-center gap-1.5 rounded-lg px-2 text-[11px] font-medium uppercase tracking-label text-muted-foreground transition-colors duration-fast ease-standard hover:bg-elevated hover:text-foreground focus-visible:bg-elevated focus-visible:text-foreground data-[state=open]:bg-elevated data-[state=open]:text-foreground motion-reduce:transition-none sm:px-3";
+  "group focus-ring inline-flex h-10 items-center justify-center gap-1.5 rounded-lg px-2 text-[13px] font-medium tracking-label text-muted-foreground transition-colors duration-fast ease-standard hover:bg-elevated hover:text-foreground focus-visible:bg-elevated focus-visible:text-foreground data-[state=open]:bg-elevated data-[state=open]:text-foreground motion-reduce:transition-none sm:px-3";
 
 function PublicNavDropdown({ label, links }: { label: string; links: NavLink[] }) {
   return (
