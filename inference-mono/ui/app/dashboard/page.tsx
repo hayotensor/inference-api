@@ -180,7 +180,7 @@ export default function DashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle>Subscription</CardTitle>
-            <CardDescription>Billing status is not calculated in the UI.</CardDescription>
+            <CardDescription>Billing status.</CardDescription>
           </CardHeader>
           <CardContent>
             {subscriptionQuery.isLoading ? <LoadingState /> : null}

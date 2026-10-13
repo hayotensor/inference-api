@@ -46,7 +46,7 @@ const productLinks: NavLink[] = [
 const resourceLinks: NavLink[] = [
   { label: "Privacy policy", href: "/privacy", icon: LockKeyhole },
   { label: "Terms of Service", href: "/terms", icon: FileText },
-  { label: "Security", href: "/security", icon: ShieldCheck },
+  { label: "Privacy & Security", href: "/security", icon: ShieldCheck },
   { label: "Brand kit", href: "/brand", icon: Palette },
   { label: "Customer service", href: "mailto:contact@talaris.xyz", icon: LifeBuoy, external: true },
   { label: "Status", href: "/status", icon: Activity },
