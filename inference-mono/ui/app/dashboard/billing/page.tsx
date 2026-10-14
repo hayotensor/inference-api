@@ -92,8 +92,11 @@ export default function BillingPage() {
   });
   const cancelMutation = useMutation({
     mutationFn: () => billingApi.cancel(true),
-    onSuccess: async () => {
-      toast.success("Cancellation scheduled");
+    onSuccess: async (subscription) => {
+      const activeUntil = subscription.current_period_end
+        ? formatDate(subscription.current_period_end)
+        : "the end of your current billing period";
+      toast.success(`Renewal canceled. Your plan remains active until ${activeUntil}.`);
       await queryClient.invalidateQueries({ queryKey: ["billing-subscription"] });
     },
     onError: (error) => toast.error(apiErrorMessage(error))
