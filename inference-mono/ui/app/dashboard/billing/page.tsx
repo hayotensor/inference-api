@@ -197,7 +197,11 @@ export default function BillingPage() {
                   <Button
                     variant="outline"
                     onClick={() => cancelMutation.mutate()}
-                    disabled={cancelMutation.isPending || subscription.status !== "active"}
+                    disabled={
+                      cancelMutation.isPending ||
+                      subscription.status !== "active" ||
+                      subscription.cancel_at_period_end
+                    }
                   >
                     {cancelMutation.isPending ? (
                       <Loader2 className="animate-spin" />
