@@ -39,7 +39,7 @@ export default function ReferralsPage() {
     <>
       <DashboardPageHeader
         title="Referrals"
-        description="Share your link. When someone you referred pays for a plan or tops up their wallet, you earn 10% of that payment back as bonus inference-token credits, not cash."
+        description="Share your link. When someone you referred pays for a plan or tops up their wallet, you earn 10% of that payment back as bonus credits."
         action={
           <Button variant="outline" onClick={() => void summaryQuery.refetch()}>
             <RefreshCw />
@@ -63,7 +63,7 @@ export default function ReferralsPage() {
               detail="People who signed up through your link"
             />
             <StatCard
-              label="Tokens earned"
+              label="Credits earned"
               value={formatNumber(summary.total_tokens_earned)}
               icon={Gift}
               detail="Lifetime bonus credits added to your wallet"
@@ -76,9 +76,8 @@ export default function ReferralsPage() {
               <CardTitle>Your referral link</CardTitle>
               <CardDescription>
                 Anyone who signs up through this link is permanently attributed to you. For the
-                first 12 months after they sign up, 10% of what they pay Stripe (subscription or
-                wallet top-up) is credited to your wallet as bonus tokens, converted at their own
-                plan&apos;s effective $/token rate.
+                first 12 months after they sign up, 10% of what they pay (subscription or
+                wallet top-up) is credited to your wallet as bonus credits.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -103,7 +102,7 @@ export default function ReferralsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Earnings history</CardTitle>
-              <CardDescription>The most recent bonus-token credits your referrals earned you.</CardDescription>
+              <CardDescription>The most recent credits your referrals earned you.</CardDescription>
             </CardHeader>
             <CardContent>
               {summary.recent_earnings.length === 0 ? (
@@ -116,7 +115,7 @@ export default function ReferralsPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Date</TableHead>
-                      <TableHead>Tokens credited</TableHead>
+                      <TableHead>Credits rewarded</TableHead>
                       <TableHead className="text-right">Bonus value</TableHead>
                     </TableRow>
                   </TableHeader>
