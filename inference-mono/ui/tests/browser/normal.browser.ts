@@ -1,5 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
-import { createDemoState } from "../../lib/demo/fixtures";
+import { test, expect, type Page, type Route } from "@playwright/test";
+import { createDemoState, ownerRole } from "../../lib/demo/fixtures";
 
 const address = "0x000000000000000000000000000000000000dEaD";
 
@@ -77,13 +77,92 @@ async function mockBackend(page: Page, baseURL: string, signedIn: boolean) {
     const responses: Record<string, unknown> = {
       "/me": fixtures.user, "/usage/current": fixtures.usage,
       "/billing/subscription": fixtures.subscription, "/api-keys": fixtures.keys,
-      "/wallets/evm": linked ? fixtures.wallet : null
+      "/wallets/evm": linked ? fixtures.wallet : null,
+      "/admin/me": {
+        id: fixtures.user.id, email: fixtures.user.email,
+        roles: [ownerRole], permissions: ownerRole.permissions
+      }
     };
     if (path in responses) return route.fulfill({ json: responses[path] });
     if (url.origin !== new URL(baseURL).origin) return route.abort();
     return route.continue();
   });
   return verifications;
+}
+
+for (const mobile of [false, true]) {
+  for (const scenario of [
+    { area: "dashboard", current: "/dashboard/usage", heading: "Usage", label: "Usage", pending: "/dashboard/billing", pendingLabel: "Billing" },
+    { area: "admin", current: "/admin/settings", heading: "Admin settings", label: "Settings", pending: "/admin/billing/plans", pendingLabel: "Plans" }
+  ]) {
+    test(`${scenario.area} navigation returns to the current page during a stalled route load (${mobile ? "mobile" : "desktop"})`, async ({ page, baseURL }) => {
+      await page.setViewportSize({ width: mobile ? 390 : 1440, height: 1000 });
+      await mockBackend(page, baseURL!, true);
+      const held: Route[] = [];
+      const isPendingRoute = (url: URL) =>
+        url.pathname === scenario.pending && url.searchParams.has("_rsc");
+      // Hold the route response, including any prefetch, until navigation back
+      // has succeeded. The old implementation leaves only its spinner visible.
+      await page.route(isPendingRoute, (route) => { held.push(route); });
+      try {
+        await page.goto(scenario.current);
+        const heading = page.getByRole("heading", { name: scenario.heading, exact: true });
+        await expect(heading).toBeVisible();
+        const nav = page.locator(mobile ? "header nav" : "aside nav");
+        await nav.getByRole("link", { name: scenario.pendingLabel, exact: true }).click();
+        await expect.poll(() => held.length).toBeGreaterThan(0);
+        await expect(heading).toBeHidden();
+        await expect(page.locator("main").getByRole("status")).toBeVisible();
+
+        await nav.getByRole("link", { name: scenario.label, exact: true }).click();
+        await expect(page).toHaveURL(new URL(scenario.current, baseURL!).href);
+        await expect(heading).toBeVisible();
+
+        const response = page.waitForResponse((response) => isPendingRoute(new URL(response.url())));
+        await page.unroute(isPendingRoute);
+        await Promise.all(held.splice(0).map((route) => route.continue()));
+        // A discarded navigation can leave its response body unread. Wait for
+        // the server response without requiring the router to consume it.
+        await response;
+        await expect(page).toHaveURL(new URL(scenario.current, baseURL!).href);
+        await expect(heading).toBeVisible();
+      } finally {
+        await Promise.all(held.map((route) => route.abort().catch(() => {})));
+      }
+    });
+  }
+
+  test(`dashboard navigation preserves unsaved settings when cancelled (${mobile ? "mobile" : "desktop"})`, async ({ page, baseURL }) => {
+    await page.setViewportSize({ width: mobile ? 390 : 1440, height: 1000 });
+    await mockBackend(page, baseURL!, true);
+    const held: Route[] = [];
+    await page.route(
+      (url) => url.pathname === "/dashboard/billing" && url.searchParams.has("_rsc"),
+      (route) => { held.push(route); }
+    );
+    try {
+      await page.goto("/dashboard/settings");
+      const name = page.getByRole("textbox", { name: "Name", exact: true });
+      await name.fill("Unsaved profile edit");
+      const nav = page.locator(mobile ? "header nav" : "aside nav");
+      await nav.getByRole("link", { name: "Billing", exact: true }).click();
+      await expect.poll(() => held.length).toBeGreaterThan(0);
+      await expect(name).toBeHidden();
+      await page.getByRole("button", { name: "Account menu", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+      await expect(name).toBeVisible();
+      await expect(name).toHaveValue("Unsaved profile edit");
+
+      // Choosing a different destination must also interrupt the stalled route.
+      await nav.getByRole("link", { name: "Billing", exact: true }).click();
+      await expect(name).toBeHidden();
+      await nav.getByRole("link", { name: "Usage", exact: true }).click();
+      await expect(page).toHaveURL(new URL("/dashboard/usage", baseURL!).href);
+      await expect(page.getByRole("heading", { name: "Usage", exact: true })).toBeVisible();
+    } finally {
+      await Promise.all(held.map((route) => route.abort().catch(() => {})));
+    }
+  });
 }
 
 test("dashboard defers wallet SDK until connection, then signs and shares the connection across routes", async ({ page, baseURL }) => {

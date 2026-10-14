@@ -1,11 +1,13 @@
 "use client";
 
 import * as React from "react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  ChevronUp,
   CreditCard,
   ExternalLink,
   Gift,
@@ -17,6 +19,7 @@ import {
   Moon,
   Settings,
   Sun,
+  UserRound,
   WalletCards
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -34,30 +37,24 @@ import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { UI_DEMO_MODE } from "@/lib/demo-mode";
 
-/**
- * Dark/light toggle. Icon-only and unlabeled by the kit's nav conventions --
- * it sits with account chrome (log out), not with the section nav -- and
- * shows the mode a click switches *to* (a moon while on light, a sun while on
- * dark), which is the common convention for this control.
- */
-function ThemeToggle({ className }: { className?: string }) {
+function ThemeMenuItem() {
   const { theme, toggleTheme } = useTheme();
   const switchingToLight = theme === "dark";
   return (
-    <Button
-      variant="outline"
-      size="icon"
-      className={className}
-      onClick={toggleTheme}
-      aria-label={switchingToLight ? "Switch to light mode" : "Switch to dark mode"}
-      title={switchingToLight ? "Switch to light mode" : "Switch to dark mode"}
+    <DropdownMenu.Item
+      className={accountMenuItemClass}
+      onSelect={(event) => {
+        event.preventDefault();
+        toggleTheme();
+      }}
     >
       {switchingToLight ? (
         <Sun strokeWidth={1.5} />
       ) : (
         <Moon strokeWidth={1.5} />
       )}
-    </Button>
+      {switchingToLight ? "Switch to light mode" : "Switch to dark mode"}
+    </DropdownMenu.Item>
   );
 }
 
@@ -139,9 +136,11 @@ const navItems: NavItem[] = [
   { href: "/dashboard/api-keys", label: "API keys", icon: KeyRound },
   { href: "/dashboard/usage", label: "Usage", icon: BarChart3 },
   { href: "/dashboard/billing", label: "Billing", icon: CreditCard },
-  { href: "/dashboard/referrals", label: "Referrals", icon: Gift },
-  { href: "/dashboard/settings", label: "Settings", icon: Settings }
+  { href: "/dashboard/referrals", label: "Referrals", icon: Gift }
 ];
+
+const accountMenuItemClass =
+  "flex cursor-pointer select-none items-center gap-2 rounded-sm px-3 py-2 text-sm outline-none transition-colors duration-fast ease-standard data-[highlighted]:bg-card [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0";
 
 // Nav is system metadata, so it takes the kit's label treatment: UPPERCASE
 // Inter Medium at 0.14em. The active item is marked by an Off-White left rule
@@ -168,6 +167,81 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const { activePath, isPending, markPendingHref } = usePendingNavPath(pathname);
   const { user, logout, ensureSsoCookie } = useAuth();
   const [logoutConfirmOpen, setLogoutConfirmOpen] = React.useState(false);
+  const logoutRequested = React.useRef(false);
+  const accountTriggerRef = React.useRef<HTMLButtonElement | null>(null);
+
+  const renderAccountMenu = (mobile: boolean) => (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <Button
+          variant={mobile ? "outline" : "ghost"}
+          size={mobile ? "icon" : "default"}
+          aria-label="Account menu"
+          onFocus={(event) => { accountTriggerRef.current = event.currentTarget; }}
+          className={cn(
+            "data-[state=open]:bg-elevated",
+            !mobile && "h-auto w-full justify-between gap-3 px-2 py-2 text-left text-foreground"
+          )}
+        >
+          {mobile ? (
+            <UserRound strokeWidth={1.5} />
+          ) : (
+            <>
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium">
+                  {user?.full_name || user?.email}
+                </span>
+                <span className="metadata mt-0.5 block truncate text-xs">{user?.email}</span>
+              </span>
+              <ChevronUp strokeWidth={1.5} className="text-muted-foreground" />
+            </>
+          )}
+        </Button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          side="top"
+          align={mobile ? "end" : "start"}
+          sideOffset={8}
+          collisionPadding={8}
+          onCloseAutoFocus={() => {
+            // Let the menu release focus before the confirmation dialog takes it.
+            if (logoutRequested.current) {
+              logoutRequested.current = false;
+              setLogoutConfirmOpen(true);
+            }
+          }}
+          className="z-50 min-w-[14rem] max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-elevated p-1 text-foreground"
+        >
+          {mobile ? (
+            <>
+              <DropdownMenu.Label className="px-3 py-2">
+                <span className="block truncate text-sm font-medium">{user?.full_name || user?.email}</span>
+                <span className="metadata mt-0.5 block truncate text-xs">{user?.email}</span>
+              </DropdownMenu.Label>
+              <DropdownMenu.Separator className="my-1 h-px bg-border" />
+            </>
+          ) : null}
+          <DropdownMenu.Item asChild className={accountMenuItemClass}>
+            <Link
+              href="/dashboard/settings"
+              onClick={(event) => markPendingHref("/dashboard/settings", event)}
+              aria-current={navPathMatches(activePath, "/dashboard/settings", "/dashboard") ? "page" : undefined}
+            >
+              <Settings strokeWidth={1.5} />
+              Settings
+            </Link>
+          </DropdownMenu.Item>
+          <ThemeMenuItem />
+          <DropdownMenu.Separator className="my-1 h-px bg-border" />
+          <DropdownMenu.Item className={accountMenuItemClass} onSelect={() => { logoutRequested.current = true; }}>
+            <LogOut strokeWidth={1.5} />
+            Log out
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
 
   // Chat lives behind a front door that authenticates by the httpOnly SSO cookie.
   // Navigating there before that cookie is in place gets the user bounced to the
@@ -237,21 +311,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             <div className="border-t border-border p-4">
               <AttestationBadge />
               <div className="mt-4 min-w-0 border-t border-border pt-4">
-                <p className="truncate text-sm font-medium text-foreground">
-                  {user?.full_name || user?.email}
-                </p>
-                <p className="metadata mt-0.5 truncate text-xs">{user?.email}</p>
-              </div>
-              <div className="mt-3 flex gap-2">
-                <Button
-                  variant="outline"
-                  className="flex-1 justify-start"
-                  onClick={() => setLogoutConfirmOpen(true)}
-                >
-                  <LogOut strokeWidth={1.5} />
-                  Log out
-                </Button>
-                <ThemeToggle />
+                {renderAccountMenu(false)}
               </div>
             </div>
           </div>
@@ -270,11 +330,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               <AppLogo />
               <div className="flex items-center gap-2">
                 <ChatButton ensureSsoCookie={ensureSsoCookie} />
-                <ThemeToggle />
-                <Button variant="outline" size="sm" onClick={() => setLogoutConfirmOpen(true)}>
-                  <LogOut strokeWidth={1.5} />
-                  Log out
-                </Button>
+                {renderAccountMenu(true)}
               </div>
             </div>
             <div className="border-t border-border px-4 py-2">
@@ -284,8 +340,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               {renderNav(true)}
             </nav>
           </header>
-          <main className="page-shell py-8 lg:py-12">
-            {isPending ? <PageLoadingState /> : children}
+          <main className="page-shell py-8 lg:py-12" aria-busy={isPending}>
+            {/* Keep the route mounted so cancelling navigation preserves its state. */}
+            <div hidden={isPending}>{children}</div>
+            {isPending ? <PageLoadingState /> : null}
           </main>
           <SiteFooter />
         </div>
@@ -293,6 +351,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       <LogoutConfirmDialog
         open={logoutConfirmOpen}
         onOpenChange={setLogoutConfirmOpen}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          accountTriggerRef.current?.focus();
+        }}
         onConfirm={() => {
           setLogoutConfirmOpen(false);
           void logout();

@@ -27,11 +27,8 @@ export function usePendingNavPath(pathname: string) {
         return;
       }
 
-      if (href === pathname) {
-        return;
-      }
-
-      setPendingHref(href);
+      // Returning to the current route won't trigger the pathname effect.
+      setPendingHref(href === pathname ? null : href);
     },
     [pathname]
   );

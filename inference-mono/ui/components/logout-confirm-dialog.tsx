@@ -31,17 +31,20 @@ import {
 export function LogoutConfirmDialog({
   open,
   onOpenChange,
-  onConfirm
+  onConfirm,
+  onCloseAutoFocus
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
+  onCloseAutoFocus?: React.ComponentPropsWithoutRef<typeof DialogContent>["onCloseAutoFocus"];
 }) {
   const cancelRef = React.useRef<HTMLButtonElement>(null);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        onCloseAutoFocus={onCloseAutoFocus}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           cancelRef.current?.focus();

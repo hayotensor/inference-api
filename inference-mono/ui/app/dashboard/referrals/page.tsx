@@ -108,7 +108,7 @@ export default function ReferralsPage() {
               {summary.recent_earnings.length === 0 ? (
                 <EmptyState
                   title="No earnings yet"
-                  description="Once someone who signed up through your link pays for a plan or tops up their wallet, the bonus tokens show up here."
+                  description="Once someone who signed up through your link pays for a plan or tops up their wallet, the bonus credits show up here."
                 />
               ) : (
                 <Table>

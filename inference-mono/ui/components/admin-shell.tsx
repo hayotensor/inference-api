@@ -230,8 +230,10 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
             })}
           </nav>
         </header>
-        <main className="page-shell py-8 lg:py-12">
-          {isPending ? <PageLoadingState /> : children}
+        <main className="page-shell py-8 lg:py-12" aria-busy={isPending}>
+          {/* Keep the route mounted so cancelling navigation preserves its state. */}
+          <div hidden={isPending}>{children}</div>
+          {isPending ? <PageLoadingState /> : null}
         </main>
         <SiteFooter />
       </div>
