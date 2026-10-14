@@ -119,7 +119,7 @@ export default function BillingPage() {
     <>
       <DashboardPageHeader
         title="Billing"
-        description="Subscriptions are charged by Stripe. Changing an existing plan happens in the Stripe customer portal."
+        description="Manage your credits."
         action={
           <div className="flex items-center gap-2">
             {isStripeTestMode ? <Badge variant="warning">Stripe test mode</Badge> : null}
@@ -135,7 +135,7 @@ export default function BillingPage() {
         <Card>
           <CardHeader>
             <CardTitle>Current subscription</CardTitle>
-            <CardDescription>What Stripe is charging this account today.</CardDescription>
+            <CardDescription>Your plan, billing period, and renewal details.</CardDescription>
           </CardHeader>
           <CardContent>
             {subscriptionQuery.isLoading ? <LoadingState /> : null}
@@ -150,7 +150,7 @@ export default function BillingPage() {
                 </div>
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="text-muted-foreground">Price</span>
-                  <span className="text-2xl font-semibold tracking-normal">
+                  <span className="text-sm font-semibold tracking-normal">
                     {subscription.amount_cents !== null && subscription.amount_cents !== undefined
                       ? formatMoney(subscription.amount_cents, subscription.currency)
                       : "$0"}
@@ -216,9 +216,8 @@ export default function BillingPage() {
                 <CardTitle>Plans</CardTitle>
                 <CardDescription>
                   {hasActiveSubscription
-                    ? "Switching plans updates the subscription in place; Stripe prorates the difference."
-                    : "Choosing a paid plan opens Stripe Checkout."}{" "}
-                  Credits are spent per request at each model&apos;s rate, not 1 token for 1 credit.
+                    ? "Switching plans updates the subscription in place; The difference prorates."
+                    : "Choosing a paid plan opens Checkout."}{" "}
                 </CardDescription>
               </div>
               {annualAvailable ? (
