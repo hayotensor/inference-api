@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { KeyRound, Loader2, Mail, Save, Trash2 } from "lucide-react";
+import { KeyRound, Loader2, Mail, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -123,14 +123,14 @@ export default function SettingsPage() {
     <>
       <DashboardPageHeader
         title="Settings"
-        description="Account updates are sent to the existing user and auth endpoints."
+        description="Review and update profile."
       />
 
       <div className="grid gap-4 lg:max-w-2xl">
         <Card>
           <CardHeader>
             <CardTitle>Profile</CardTitle>
-            <CardDescription>Update account fields through `/me`.</CardDescription>
+            <CardDescription>Update profile.</CardDescription>
           </CardHeader>
           <CardContent>
             <form
@@ -283,24 +283,17 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         ) : null}
-      </div>
 
-      <Card className="mt-4 border-destructive/30">
-        <CardHeader>
-          <CardTitle>Danger zone</CardTitle>
-          <CardDescription>Deleting the account calls `DELETE /me`.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button
-            variant="destructive"
-            disabled={deleteMutation.isPending}
-            onClick={() => setConfirmingDelete(true)}
-          >
-            {deleteMutation.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
-            Delete account
-          </Button>
-        </CardContent>
-      </Card>
+        <Button
+          type="button"
+          variant="link"
+          className="h-auto justify-self-start px-0 py-2 font-normal text-muted-foreground [.light_&]:text-stone [.light_&]:hover:text-muted-foreground"
+          disabled={deleteMutation.isPending}
+          onClick={() => setConfirmingDelete(true)}
+        >
+          Delete account
+        </Button>
+      </div>
 
       <AdminConfirmDialog
         open={confirmingDelete}
