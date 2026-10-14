@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, RefreshCw, Trash2, WalletCards } from "lucide-react";
 import { toast } from "sonner";
 import { useWallet } from "@/lib/wallet";
 
+import { AdminConfirmDialog } from "@/components/admin-common";
 import { DashboardPageHeader } from "@/components/dashboard-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 import { NoWalletNotice } from "@/components/no-wallet-notice";
@@ -33,6 +35,7 @@ import type { BalanceSyncResponse } from "@/lib/types";
 export default function WalletPage() {
   const queryClient = useQueryClient();
   const { address, isConnected, signMessageAsync } = useWallet();
+  const [confirmingUnlink, setConfirmingUnlink] = useState(false);
 
   const walletQuery = useQuery({
     queryKey: ["wallet-evm"],
@@ -73,6 +76,7 @@ export default function WalletPage() {
   const unlinkMutation = useMutation({
     mutationFn: walletsApi.unlink,
     onSuccess: async () => {
+      setConfirmingUnlink(false);
       toast.success("Wallet unlinked");
       await queryClient.invalidateQueries({ queryKey: ["wallet-evm"] });
     },
@@ -85,7 +89,7 @@ export default function WalletPage() {
     <>
       <DashboardPageHeader
         title="Wallet"
-        description="Wallet ownership is verified by signing a backend-provided nonce."
+        description="Get rewarded with credits by staking TENSOR."
         action={<WalletConnectButton />}
       />
 
@@ -176,7 +180,7 @@ export default function WalletPage() {
               </Button>
               <Button
                 variant="outline"
-                onClick={() => unlinkMutation.mutate()}
+                onClick={() => setConfirmingUnlink(true)}
                 disabled={!walletQuery.data || unlinkMutation.isPending}
               >
                 {unlinkMutation.isPending ? (
@@ -194,7 +198,7 @@ export default function WalletPage() {
           <CardHeader>
             <CardTitle>Balance sync</CardTitle>
             <CardDescription>
-              Allowances and balances are displayed from `/wallets/evm/sync-balances`.
+              Allowances and balances.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -231,6 +235,18 @@ export default function WalletPage() {
           </CardContent>
         </Card>
       </div>
+
+      <AdminConfirmDialog
+        open={confirmingUnlink}
+        onOpenChange={(open) => {
+          if (!unlinkMutation.isPending) setConfirmingUnlink(open);
+        }}
+        title="Unlink this wallet?"
+        description="This removes the verified wallet from your account. You'll need to verify it again to link it back."
+        confirmLabel="Unlink wallet"
+        pending={unlinkMutation.isPending}
+        onConfirm={() => unlinkMutation.mutate()}
+      />
     </>
   );
 }

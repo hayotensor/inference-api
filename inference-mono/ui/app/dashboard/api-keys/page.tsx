@@ -121,7 +121,7 @@ export default function ApiKeysPage() {
     <>
       <DashboardPageHeader
         title="API keys"
-        description="Create scoped credentials and revoke them through the backend API."
+        description="Manage your API keys."
         action={
           <Button
             onClick={() => {

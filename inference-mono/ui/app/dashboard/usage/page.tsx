@@ -133,9 +133,9 @@ export default function UsagePage() {
 
       <Card className="mt-6">
         <CardHeader>
-          <CardTitle>Allowance breakdown</CardTitle>
+          <CardTitle>Credits breakdown</CardTitle>
           <CardDescription>
-            All figures are credits -- displayed without client-side recomputation.
+            A breakdown of your credits from all sources.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -180,9 +180,7 @@ export default function UsagePage() {
         <CardHeader>
           <CardTitle>Usage by model</CardTitle>
           <CardDescription>
-            One row per model. Raw token totals are summed across every request for that
-            model; Rate is that model&apos;s credit multiplier, and Credits charged is what
-            actually came out of your allowance. Select a model to see its recent requests.
+            View your credit and token usage by model. Select a model to explore its usage details.
           </CardDescription>
         </CardHeader>
         <CardContent>
