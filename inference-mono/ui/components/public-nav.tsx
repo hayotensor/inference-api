@@ -44,6 +44,8 @@ const productLinks: NavLink[] = [
 ];
 
 const resourceLinks: NavLink[] = [
+  { label: "API documentation", href: "#", icon: Code2 },
+  { label: "Miner documentation", href: "#", icon: BookOpen },
   { label: "Privacy policy", href: "/privacy", icon: LockKeyhole },
   { label: "Terms of Service", href: "/terms", icon: FileText },
   { label: "Privacy & Security", href: "/security", icon: ShieldCheck },
@@ -84,7 +86,7 @@ function PublicNavDropdown({ label, links }: { label: string; links: NavLink[] }
             );
 
             return (
-              <li key={href}>
+              <li key={linkLabel}>
                 <NavigationMenu.Link asChild>
                   {external ? (
                     <a href={href} className={className}>{content}</a>

@@ -340,13 +340,14 @@ export default function BillingPage() {
             {walletBalanceQuery.data ? (
               <div className="space-y-4 text-sm">
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-muted-foreground">Credits</span>
+                  <span className="text-muted-foreground font-medium">Pay-as-you-go credits</span>
                   <span className="text-2xl font-semibold tracking-normal">
                     {formatNumber(walletBalanceQuery.data.balance_tokens)}
                   </span>
                 </div>
-                <div className="space-y-2">
-                  <span className="text-muted-foreground font-bold">Top up</span>
+                <div className="space-y-4">
+                  <div className="my-4 border-t-2 border-gray-100"></div>
+                  <span className="text-muted-foreground font-medium">Top up</span>
                   {walletBundlesQuery.isLoading ? <LoadingState /> : null}
                   {walletBundlesQuery.isError ? <ErrorState error={walletBundlesQuery.error} /> : null}
                   <div className="grid gap-2 sm:grid-cols-2">
