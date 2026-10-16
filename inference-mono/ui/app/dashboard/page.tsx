@@ -49,6 +49,10 @@ export default function DashboardPage() {
     queryKey: ["billing-subscription"],
     queryFn: billingApi.subscription
   });
+  const walletBalanceQuery = useQuery({
+    queryKey: ["wallet-balance"],
+    queryFn: billingApi.walletBalance
+  });
   const keysQuery = useQuery({
     queryKey: ["api-keys"],
     queryFn: apiKeysApi.list
@@ -96,7 +100,13 @@ export default function DashboardPage() {
         title="Overview"
         description="Your account overview."
         action={
-          <Button variant="outline" onClick={() => void usageQuery.refetch()}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              void usageQuery.refetch();
+              void walletBalanceQuery.refetch();
+            }}
+          >
             <RefreshCw />
             Refresh
           </Button>
@@ -141,7 +151,8 @@ export default function DashboardPage() {
           <CardHeader>
             <CardTitle>Credit allowance</CardTitle>
             <CardDescription>
-              Displaying the current usage period exactly as returned by the API.
+              Your allowance by source and separate pay-as-you-go balance. The bar
+              shows the percentage of your period allowance used.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -150,16 +161,31 @@ export default function DashboardPage() {
                 <Progress value={percent} />
                 <div className="grid gap-3 sm:grid-cols-2">
                   {[
-                    ["Stripe allowance", usage.stripe_allowance],
+                    ["Plan allowance", usage.stripe_allowance],
                     ["Ethereum ERC20 allowance", usage.ethereum_erc20_allowance],
                     ["Substrate native allowance", usage.substrate_native_allowance],
-                    ["Manual allowance", usage.manual_allowance]
+                    ...(usage.manual_allowance !== 0
+                      ? [["Manual allowance", usage.manual_allowance]]
+                      : [])
                   ].map(([label, value]) => (
                     <div key={label} className="rounded-lg border bg-muted/30 p-3">
                       <p className="text-xs text-muted-foreground">{label}</p>
                       <p className="mt-1 font-semibold">{formatNumber(value)}</p>
                     </div>
                   ))}
+                  <div className="rounded-lg border bg-muted/30 p-3">
+                    <p className="text-xs text-muted-foreground">Pay-as-you-go balance</p>
+                    <p className="mt-1 font-semibold">
+                      {walletBalanceQuery.isLoading
+                        ? "Loading…"
+                        : walletBalanceQuery.isError
+                          ? "Unavailable"
+                          : formatNumber(walletBalanceQuery.data?.balance_tokens)}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Used after your period allowance runs out.
+                    </p>
+                  </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   See{" "}
@@ -178,7 +204,7 @@ export default function DashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle>Subscription</CardTitle>
-            <CardDescription>Billing status.</CardDescription>
+            <CardDescription>Your current subscription status.</CardDescription>
           </CardHeader>
           <CardContent>
             {subscriptionQuery.isLoading ? <LoadingState /> : null}

@@ -231,7 +231,7 @@ export default function ApiKeysPage() {
             ) : null}
             {modelsQuery.data && modelsQuery.data.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No models are registered yet -- this key will reach every model once one is.
+                No models are registered yet. This key will reach every model once one is.
               </p>
             ) : null}
           </div>

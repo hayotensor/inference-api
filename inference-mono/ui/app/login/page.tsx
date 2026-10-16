@@ -164,8 +164,8 @@ export default function LoginPage() {
         </div>
 
         <p className="mt-3 text-center text-xs text-muted-foreground">
-          Connect an EVM wallet -- a browser extension, or a mobile/hardware wallet via
-          WalletConnect -- then sign a message to prove ownership. No password is created.
+          Connect an EVM wallet with a browser extension, or a mobile/hardware wallet via
+          WalletConnect, then sign a message to prove ownership. No password is created.
         </p>
 
         <p className="mt-3 text-center text-xs text-muted-foreground">

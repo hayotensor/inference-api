@@ -16,6 +16,7 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle
 } from "@/components/ui/card";
@@ -67,10 +68,9 @@ export default function PricingPage() {
               Pricing
             </h1>
             <p className="mt-3 text-muted-foreground">
-              Every plan includes a monthly credit allowance across all served models. Credits
-              are spent per request, and each model has its own rate -- larger models cost more
-              credits per token than smaller ones. Cancel or change plans at any time from the
-              billing dashboard.
+              Every plan includes monthly credits to use across all available models. Each
+              request uses credits based on the model and the number of tokens processed.
+              Change or cancel your plan anytime from your billing dashboard.
             </p>
           </div>
           {annualAvailable ? (
@@ -88,7 +88,7 @@ export default function PricingPage() {
         ) : null}
 
         {plansQuery.data ? (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <div className="flex flex-wrap justify-center gap-4">
             {plans.map((plan) => (
               <PlanCard
                 key={plan.id}
@@ -148,7 +148,9 @@ function PlanCard({
       ];
 
   return (
-    <Card className={plan.name === "Pro" ? "border-primary" : ""}>
+    <Card
+      className={`flex w-full min-w-0 flex-col md:w-[calc(50%-0.5rem)] xl:w-[calc(20%-0.8rem)] ${plan.name === "Pro" ? "border-primary" : ""}`}
+    >
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <CardTitle>{plan.name}</CardTitle>
@@ -158,7 +160,7 @@ function PlanCard({
           {plan.is_unlimited ? "Unlimited credits" : `${formatNumber(plan.monthly_token_allowance)} credits per month`}
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-5">
+      <CardContent className="flex-1 space-y-5 pb-5">
         <div>
           <div className="text-3xl font-semibold tracking-normal">
             {isFree || purchasable ? formatMoney(priceCents, plan.currency) : "Unavailable"}
@@ -185,7 +187,8 @@ function PlanCard({
             </li>
           ))}
         </ul>
-
+      </CardContent>
+      <CardFooter>
         {isFree ? (
           <Button className="w-full" variant="outline" asChild>
             <Link href={isAuthenticated ? "/dashboard" : "/signup"}>
@@ -210,7 +213,7 @@ function PlanCard({
             </Link>
           </Button>
         )}
-      </CardContent>
+      </CardFooter>
     </Card>
   );
 }
