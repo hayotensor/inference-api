@@ -162,8 +162,8 @@ export default function DashboardPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   {[
                     ["Plan allowance", usage.stripe_allowance],
-                    ["Ethereum ERC20 allowance", usage.ethereum_erc20_allowance],
-                    ["Substrate native allowance", usage.substrate_native_allowance],
+                    ["wTLRS staking allowance", usage.ethereum_erc20_allowance],
+                    ["TLRS staking allowance", usage.substrate_native_allowance],
                     ...(usage.manual_allowance !== 0
                       ? [["Manual allowance", usage.manual_allowance]]
                       : [])
