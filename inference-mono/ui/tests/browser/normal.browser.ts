@@ -215,3 +215,28 @@ test("wallet login loads on demand and signs the backend nonce", async ({ page, 
   } }]);
   expect(errors).toEqual([]);
 });
+
+test("dashboard refetches live account data every minute", async ({ page, baseURL }) => {
+  await page.clock.install();
+  await mockBackend(page, baseURL!, true);
+  const usage = createDemoState().usage;
+  let usageRequests = 0;
+  await page.route(
+    (url) => url.pathname === "/usage/current",
+    (route) => {
+      usageRequests += 1;
+      return route.fulfill({ json: { ...usage, used_tokens: usageRequests === 1 ? 1_234 : 5_678 } });
+    }
+  );
+  await page.goto("/dashboard");
+  const creditsUsed = page.locator("main");
+  await expect(creditsUsed).toContainText("1,234");
+  const initialRequests = usageRequests;
+
+  await page.clock.fastForward(30_000);
+  expect(usageRequests).toBe(initialRequests);
+
+  await page.clock.fastForward(31_000);
+  await expect.poll(() => usageRequests).toBeGreaterThan(initialRequests);
+  await expect(creditsUsed).toContainText("5,678");
+});

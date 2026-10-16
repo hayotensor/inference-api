@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { AdminPagination } from "@/components/admin-common";
 import { DashboardPageHeader } from "@/components/dashboard-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
+import { CreditsChart, creditsByDay } from "@/components/credits-chart";
 import { StatCard } from "@/components/stat-card";
 import { Button } from "@/components/ui/button";
 import {
@@ -62,6 +63,10 @@ export default function UsagePage() {
     queryKey: ["usage-allowance"],
     queryFn: usageApi.allowance
   });
+  const hourlyQuery = useQuery({
+    queryKey: ["usage-hourly"],
+    queryFn: ({ signal }) => usageApi.hourly({ signal })
+  });
   const byModelQuery = useQuery({
     queryKey: ["usage-by-model", { limit: MODELS_PAGE_SIZE, offset }],
     queryFn: ({ signal }) =>
@@ -74,7 +79,8 @@ export default function UsagePage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["usage-current"] }),
         queryClient.invalidateQueries({ queryKey: ["usage-allowance"] }),
-        queryClient.invalidateQueries({ queryKey: ["usage-by-model"] })
+        queryClient.invalidateQueries({ queryKey: ["usage-by-model"] }),
+        queryClient.invalidateQueries({ queryKey: ["usage-hourly"] })
       ]);
     },
     onError: (error) => toast.error(apiErrorMessage(error))
@@ -134,7 +140,31 @@ export default function UsagePage() {
 
       <Card className="mt-6">
         <CardHeader>
-          <CardTitle>Credits breakdown</CardTitle>
+          <CardTitle>Credits over time</CardTitle>
+          <CardDescription>
+            Credits charged per day across the current usage period.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {hourlyQuery.isLoading ? <LoadingState /> : null}
+          {hourlyQuery.isError ? (
+            <ErrorState error={hourlyQuery.error} onRetry={() => void hourlyQuery.refetch()} />
+          ) : null}
+          {hourlyQuery.data ? (
+            <CreditsChart
+              points={creditsByDay(
+                hourlyQuery.data.data,
+                new Date(hourlyQuery.data.period_start),
+                new Date(Math.min(Date.now(), new Date(hourlyQuery.data.period_end).getTime()))
+              )}
+            />
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Allowance breakdown</CardTitle>
           <CardDescription>
             A breakdown of your credits from all sources.
           </CardDescription>

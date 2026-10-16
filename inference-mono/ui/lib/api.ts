@@ -23,6 +23,7 @@ import type {
   ApiKeyRead,
   ApiKeyScope,
   BalanceSyncResponse,
+  BillingHistoryResponse,
   BillingInterval,
   BillingPlan,
   BillingSubscription,
@@ -30,6 +31,8 @@ import type {
   EvmWallet,
   GuestInferenceResponse,
   MessageResponse,
+  ModelCatalogResponse,
+  ReferralCodeUpdate,
   ReferralSummary,
   StripeSessionResponse,
   TokenResponse,
@@ -37,6 +40,7 @@ import type {
   UsageByModelDetailResponse,
   UsageByModelResponse,
   UsageHistoryResponse,
+  UsageHourlyResponse,
   UsagePeriod,
   User,
   WalletBalance,
@@ -50,7 +54,7 @@ export const INFERENCE_API_BASE_URL =
   process.env.NEXT_PUBLIC_INFERENCE_API_BASE_URL ?? "http://localhost:8001";
 
 type RequestOptions = {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   auth?: boolean;
   apiKey?: string;
@@ -545,6 +549,14 @@ export const billingApi = {
       body: { cancel_at_period_end: cancelAtPeriodEnd }
     });
   },
+  // HYP-91: subscription and top-up events, newest first.
+  history(params: { limit?: number; offset?: number } = {}, options: ApiCallOptions = {}) {
+    const { limit = 20, offset = 0 } = params;
+    return apiRequest<BillingHistoryResponse>(`/billing/history?limit=${limit}&offset=${offset}`, {
+      auth: true,
+      signal: options.signal
+    });
+  },
   // HYP-66: pay-as-you-go wallet top-ups.
   walletBundles(options: ApiCallOptions = {}) {
     return apiRequest<WalletTopupBundle[]>("/billing/wallet/bundles", { signal: options.signal });
@@ -568,6 +580,14 @@ export const referralsApi = {
       auth: true,
       signal: options.signal
     });
+  },
+  // HYP-93: pick a custom code (400 invalid/reserved, 409 taken).
+  setCode(request: ReferralCodeUpdate) {
+    return apiRequest<ReferralSummary>("/referrals/me/code", {
+      method: "PUT",
+      auth: true,
+      body: request
+    });
   }
 };
 
@@ -580,6 +600,12 @@ export const usageApi = {
   },
   history(limit = 100, options: ApiCallOptions = {}) {
     return apiRequest<UsageHistoryResponse>(`/usage/history?limit=${limit}`, {
+      auth: true,
+      signal: options.signal
+    });
+  },
+  hourly(options: ApiCallOptions = {}) {
+    return apiRequest<UsageHourlyResponse>("/usage/hourly", {
       auth: true,
       signal: options.signal
     });
@@ -933,6 +959,16 @@ export const adminApi = {
       auth: true,
       signal: options.signal
     });
+  }
+};
+
+/**
+ * Public model catalog for the `/models` page (HYP-92). Unauthenticated,
+ * read-only and rate-limited on the control plane (`GET /models`).
+ */
+export const modelsApi = {
+  catalog(options: ApiCallOptions = {}) {
+    return apiRequest<ModelCatalogResponse>("/models", { signal: options.signal });
   }
 };
 

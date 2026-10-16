@@ -1,7 +1,8 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { Clipboard, Gift, RefreshCw, Users } from "lucide-react";
+import * as React from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Clipboard, Gift, Pencil, RefreshCw, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { DashboardPageHeader } from "@/components/dashboard-shell";
@@ -9,6 +10,7 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 import { StatCard } from "@/components/stat-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
@@ -24,7 +26,7 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table";
-import { referralsApi } from "@/lib/api";
+import { apiErrorMessage, referralsApi } from "@/lib/api";
 import { formatDateTime, formatNumber } from "@/lib/format";
 
 export default function ReferralsPage() {
@@ -93,9 +95,7 @@ export default function ReferralsPage() {
                   Copy link
                 </Button>
               </div>
-              <p className="mt-3 text-sm text-muted-foreground">
-                Referral code: <span className="font-mono">{summary.referral_code}</span>
-              </p>
+              <CustomCodeForm currentCode={summary.referral_code} />
             </CardContent>
           </Card>
 
@@ -139,5 +139,98 @@ export default function ReferralsPage() {
         </div>
       ) : null}
     </>
+  );
+}
+
+// HYP-93: must match the backend rules in app/referrals/service.py; the API
+// is the source of truth (it also rejects reserved words and taken codes).
+const CUSTOM_CODE_PATTERN = /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/;
+
+function customCodeProblem(code: string) {
+  if (code.length < 3 || code.length > 32) return "Use 3-32 characters.";
+  if (!CUSTOM_CODE_PATTERN.test(code)) {
+    return "Use letters, numbers, - and _, starting and ending with a letter or number.";
+  }
+  return null;
+}
+
+function CustomCodeForm({ currentCode }: { currentCode: string }) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState("");
+  const normalized = draft.trim().toLowerCase();
+  const problem = draft ? customCodeProblem(normalized) : null;
+
+  const mutation = useMutation({
+    mutationFn: referralsApi.setCode,
+    onSuccess: (summary) => {
+      queryClient.setQueryData(["referrals-me"], summary);
+      setEditing(false);
+      toast.success("Referral link updated. Your old link still works.");
+    },
+    onError: (error) => toast.error(apiErrorMessage(error))
+  });
+
+  if (!editing) {
+    return (
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <span>
+          Referral code: <span className="font-mono text-foreground">{currentCode}</span>
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setDraft(currentCode.toLowerCase());
+            setEditing(true);
+          }}
+        >
+          <Pencil />
+          Customize
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      className="mt-4 space-y-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!problem && normalized) mutation.mutate({ code: normalized });
+      }}
+    >
+      <Label htmlFor="referral-code">Custom referral code</Label>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex flex-1 items-center rounded-md border border-input bg-background pl-3 focus-within:ring-2 focus-within:ring-ring">
+          <span className="font-mono text-sm text-muted-foreground">/r/</span>
+          <Input
+            id="referral-code"
+            autoFocus
+            maxLength={32}
+            autoComplete="off"
+            spellCheck={false}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            className="border-0 pl-0.5 font-mono text-sm shadow-none focus-visible:ring-0"
+            aria-invalid={Boolean(problem)}
+            aria-describedby="referral-code-help"
+          />
+        </div>
+        <Button type="submit" disabled={!normalized || Boolean(problem) || mutation.isPending}>
+          Save
+        </Button>
+        <Button type="button" variant="outline" onClick={() => setEditing(false)}>
+          Cancel
+        </Button>
+      </div>
+      <p
+        id="referral-code-help"
+        className={problem ? "text-sm text-destructive" : "text-sm text-muted-foreground"}
+      >
+        {problem ??
+          "3-32 characters: letters, numbers, - and _. Codes aren't case-sensitive. Links with your current code keep working after you change it."}
+      </p>
+    </form>
   );
 }

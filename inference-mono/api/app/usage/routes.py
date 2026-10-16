@@ -13,6 +13,7 @@ from app.usage.schemas import (
     UsageByModelDetailResponse,
     UsageByModelResponse,
     UsageHistoryResponse,
+    UsageHourlyResponse,
     UsagePeriodRead,
     UsageRecalculateRequest,
 )
@@ -43,6 +44,20 @@ async def usage_history(
 ) -> UsageHistoryResponse:
     events = await UsageService(session).usage_history(user, limit=limit)
     return UsageHistoryResponse(data=events)
+
+
+@router.get("/hourly", response_model=UsageHourlyResponse)
+@limiter.limit("60/minute")
+async def usage_hourly(
+    request: Request,
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user),
+) -> UsageHourlyResponse:
+    period, buckets = await UsageService(session).usage_hourly(user)
+    await session.commit()
+    return UsageHourlyResponse(
+        period_start=period.period_start, period_end=period.period_end, data=buckets
+    )
 
 
 @router.get("/by-model", response_model=UsageByModelResponse)

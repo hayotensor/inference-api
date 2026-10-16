@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import DateTime, Index, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.security import is_synthetic_phone_email, is_synthetic_wallet_email, utcnow
@@ -28,8 +28,10 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
     # HYP-65: this user's own shareable referral code. Generated lazily (see
     # app/referrals/service.py `ensure_referral_code`) on first access to
     # GET /referrals/me, not at signup -- an account that never opens the
-    # Referrals page never needs one. Nullable until then.
-    referral_code: Mapped[str | None] = mapped_column(String(16), unique=True, index=True)
+    # Referrals page never needs one. Nullable until then. HYP-93: users can
+    # replace it with a custom code (lowercase [a-z0-9_-], up to 32 chars);
+    # uniqueness is case-insensitive via `ux_users_referral_code_lower` below.
+    referral_code: Mapped[str | None] = mapped_column(String(32), unique=True, index=True)
     phone_number: Mapped[str | None] = mapped_column(String(32), unique=True, index=True)
     phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     wallet_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -97,3 +99,9 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
         UI uses this to hide that action instead of sending it into a void.
         """
         return not (is_synthetic_phone_email(self.email) or is_synthetic_wallet_email(self.email))
+
+
+# HYP-93: case-insensitive uniqueness for referral codes. Generated codes are
+# uppercase and custom ones lowercase, so the plain unique index above can't
+# stop "abcd2345" from shadowing a generated "ABCD2345".
+Index("ux_users_referral_code_lower", func.lower(User.referral_code), unique=True)

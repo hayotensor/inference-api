@@ -133,6 +133,36 @@ class UsageService:
         )
         return list(result.scalars())
 
+    async def usage_hourly(self, user: User) -> tuple[UsagePeriod, list[dict]]:
+        """Counted credits per UTC hour across the current period, for the
+        dashboard's credits-over-time chart. Hourly (not daily) so the browser
+        can regroup into the viewer's local days without a timezone parameter;
+        a month is at most ~744 rows however many requests the user made."""
+        period = await self.recalculate_current_period(user)
+        created_at = InferenceUsageEvent.created_at
+        if self.session.bind.dialect.name == "postgresql":
+            hour = func.date_trunc("hour", created_at)
+        else:
+            hour = func.strftime("%Y-%m-%d %H:00:00", created_at)
+        counted_tokens = func.coalesce(func.sum(self._counted_tokens_expr()), 0)
+        result = await self.session.execute(
+            select(hour.label("hour"), counted_tokens)
+            .where(
+                InferenceUsageEvent.user_id == user.id,
+                created_at >= period.period_start,
+                created_at < period.period_end,
+            )
+            .group_by(hour)
+            .order_by(hour)
+        )
+        buckets = []
+        for bucket, tokens in result.all():
+            if isinstance(bucket, str):
+                bucket = datetime.fromisoformat(bucket)
+            if tokens:
+                buckets.append({"hour": as_utc(bucket), "charged_tokens": int(tokens)})
+        return period, buckets
+
     async def usage_by_model(
         self, user: User, *, limit: int = 50, offset: int = 0
     ) -> tuple[list[dict], int]:

@@ -74,6 +74,12 @@ export function SiteFooter() {
             Privacy Policy
           </Link>
           <Link
+            href="/models"
+            className="focus-ring text-[11px] font-medium uppercase tracking-label text-muted-foreground transition-colors duration-fast ease-standard hover:text-foreground"
+          >
+            Models
+          </Link>
+          <Link
             href="/pricing"
             className="focus-ring text-[11px] font-medium uppercase tracking-label text-muted-foreground transition-colors duration-fast ease-standard hover:text-foreground"
           >

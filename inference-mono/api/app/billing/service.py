@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +18,8 @@ from app.billing.plans import (
 )
 from app.billing.stripe import StripeClient
 from app.core.errors import bad_request, forbidden, not_found
-from app.core.security import utcnow
+from app.core.security import as_utc, utcnow
+from app.db.models.billing_event import BillingEvent
 from app.db.models.billing_plan import BillingPlan
 from app.db.models.stripe_webhook_event import StripeWebhookEvent
 from app.db.models.user import User
@@ -98,6 +100,30 @@ def _subscription_item_period(subscription: Any, key: str) -> datetime | None:
         return _stripe_timestamp(value)
     item = _first_subscription_item(subscription)
     return _stripe_timestamp(_obj_get(item, key)) if item is not None else None
+
+
+_ACTIVE_STATUSES = frozenset({"active", "trialing"})
+# Statuses that mean "an existing paid subscription is still in play" -- moving
+# from one of these back to active is a recovery, not a new subscription.
+_ONGOING_STATUSES = frozenset({"active", "trialing", "past_due", "unpaid"})
+
+
+@dataclass(frozen=True)
+class _SubscriptionSnapshot:
+    stripe_subscription_id: str | None
+    stripe_price_id: str | None
+    plan_id: uuid.UUID | None
+    status: str
+    cancel_at_period_end: bool
+
+
+def _plan_label(plan_name: str | None, interval: str | None) -> str:
+    name = plan_name or "Subscription"
+    if interval == "year":
+        return f"{name} (annual)"
+    if interval == "month":
+        return f"{name} (monthly)"
+    return name
 
 
 class BillingService:
@@ -250,6 +276,17 @@ class BillingService:
             )
         )
         await self.session.flush()
+        usd_cents_value = metadata.get("usd_cents")
+        await self._record_billing_event(
+            user_id=user_id,
+            event_type="wallet_topup",
+            description=f"Pay-as-you-go top-up: {tokens:,} credits",
+            amount_cents=int(usd_cents_value) if usd_cents_value else None,
+            currency="usd" if usd_cents_value else None,
+            tokens=tokens,
+            stripe_reference=payment_intent_id,
+            dedupe=True,
+        )
 
         # HYP-65: a wallet top-up is a real payment too, and one-time
         # (mode="payment") Checkout Sessions never produce a Stripe invoice --
@@ -401,6 +438,26 @@ class BillingService:
         await self.session.flush()
         return account
 
+    async def billing_history(
+        self, user: User, *, limit: int, offset: int
+    ) -> tuple[list[BillingEvent], int]:
+        """HYP-91: the user's own billing events, newest first."""
+        total = (
+            await self.session.execute(
+                select(func.count()).select_from(BillingEvent).where(BillingEvent.user_id == user.id)
+            )
+        ).scalar_one()
+        rows = (
+            await self.session.execute(
+                select(BillingEvent)
+                .where(BillingEvent.user_id == user.id)
+                .order_by(BillingEvent.created_at.desc(), BillingEvent.id.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+        ).scalars()
+        return list(rows), int(total)
+
     async def get_subscription(self, user: User) -> UserSubscription | None:
         result = await self.session.execute(
             select(UserSubscription).where(UserSubscription.user_id == user.id)
@@ -535,7 +592,9 @@ class BillingService:
         except Exception:
             if event_type == "invoice.payment_failed":
                 await self._mark_subscription_status(str(subscription_id), "past_due")
+                await self._record_invoice_event(invoice, event_type, None)
             return
+        await self._record_invoice_event(invoice, event_type, synced)
         if event_type == "invoice.paid" and synced is not None:
             await self._credit_referral_for_invoice(invoice, synced)
 
@@ -603,9 +662,13 @@ class BillingService:
         price_id = _subscription_price_id(subscription_object)
         plan_id = await self._plan_id_for_subscription(subscription_object, price_id)
         stripe_subscription_id = str(_obj_get(subscription_object, "id"))
+        # HYP-94: Stripe's own `status` is authoritative. `canceled_at` is also
+        # populated when a cancellation is merely *scheduled*
+        # (cancel_at_period_end=true) while the subscription stays "active" and
+        # paid through current_period_end -- treating it as "canceled" stripped
+        # the paid allowance early. Stripe flips status to "canceled" itself
+        # (customer.subscription.deleted) when the period actually ends.
         status = str(_obj_get(subscription_object, "status", "unknown"))
-        if _obj_get(subscription_object, "canceled_at") and status != "canceled":
-            status = "canceled"
 
         existing = (
             await self.session.execute(
@@ -613,6 +676,16 @@ class BillingService:
             )
         ).scalar_one_or_none()
         is_new = existing is None
+        # HYP-91: snapshot the pre-sync state so the change can be recorded in
+        # the user's billing history (this row is overwritten in place).
+        previous = None if existing is None else _SubscriptionSnapshot(
+            stripe_subscription_id=existing.stripe_subscription_id,
+            stripe_price_id=existing.stripe_price_id,
+            plan_id=existing.plan_id,
+            status=existing.status,
+            cancel_at_period_end=existing.cancel_at_period_end,
+        )
+        record_history = True
         if existing is None:
             existing = UserSubscription(user_id=user_id)
         existing.stripe_subscription_id = stripe_subscription_id
@@ -634,6 +707,8 @@ class BillingService:
         except IntegrityError:
             if not is_new:
                 raise
+            # The concurrent winner already recorded this subscription's history.
+            record_history = False
             # Stripe can deliver more than one event for the same subscription
             # (checkout.session.completed, customer.subscription.created, the
             # webhook racing the /billing/success sync call) as concurrent
@@ -664,7 +739,197 @@ class BillingService:
             from app.usage.service import UsageService
 
             await UsageService(self.session).recalculate_current_period(user)
+        if record_history:
+            await self._record_subscription_changes(previous, existing)
         return existing
+
+    async def _plan_details(
+        self, plan_id: uuid.UUID | None, price_id: str | None
+    ) -> tuple[str | None, int | None, str | None, str | None]:
+        """(plan name, list price in cents, currency, interval) for a plan/price
+        pair -- the same price-id-to-interval resolution subscription_response uses."""
+        if plan_id is None:
+            return None, None, None, None
+        plan = await self.session.get(BillingPlan, plan_id)
+        if plan is None:
+            return None, None, None, None
+        if price_id and price_id == plan.stripe_annual_price_id:
+            return plan.name, plan.annual_price_cents, plan.currency, "year"
+        if price_id and price_id == plan.stripe_price_id:
+            return plan.name, plan.price_cents, plan.currency, "month"
+        return plan.name, None, plan.currency, None
+
+    async def _record_billing_event(
+        self,
+        *,
+        user_id: uuid.UUID,
+        event_type: str,
+        description: str,
+        plan_name: str | None = None,
+        amount_cents: int | None = None,
+        currency: str | None = None,
+        tokens: int | None = None,
+        stripe_reference: str | None = None,
+        dedupe: bool = False,
+    ) -> None:
+        """HYP-91: append one row to the user's billing history. `dedupe` makes
+        an event keyed by a one-shot Stripe object (invoice, payment intent)
+        idempotent against a re-delivered webhook."""
+        if dedupe and stripe_reference:
+            already = (
+                await self.session.execute(
+                    select(BillingEvent.id).where(
+                        BillingEvent.user_id == user_id,
+                        BillingEvent.event_type == event_type,
+                        BillingEvent.stripe_reference == stripe_reference,
+                    )
+                )
+            ).first()
+            if already is not None:
+                return
+        self.session.add(
+            BillingEvent(
+                user_id=user_id,
+                event_type=event_type,
+                description=description[:512],
+                plan_name=plan_name,
+                amount_cents=amount_cents,
+                currency=currency,
+                tokens=tokens,
+                stripe_reference=stripe_reference,
+            )
+        )
+        await self.session.flush()
+
+    async def _record_subscription_changes(
+        self, previous: _SubscriptionSnapshot | None, current: UserSubscription
+    ) -> None:
+        """Diff the pre-sync subscription state against what Stripe just told us
+        and record each user-visible change. Diff-based, so replaying the same
+        Stripe state (webhook + /billing/success sync, retries) records nothing.
+        Renewals are recorded from invoice.paid (see _record_invoice_event),
+        where the amount actually charged is known."""
+        plan_name, amount_cents, currency, interval = await self._plan_details(
+            current.plan_id, current.stripe_price_id
+        )
+        label = _plan_label(plan_name, interval)
+        common = {
+            "user_id": current.user_id,
+            "plan_name": plan_name,
+            "currency": currency,
+            "stripe_reference": current.stripe_subscription_id,
+        }
+        is_active = current.status in _ACTIVE_STATUSES
+        same_subscription = (
+            previous is not None
+            and previous.stripe_subscription_id == current.stripe_subscription_id
+        )
+        if is_active and (
+            not same_subscription or previous is None or previous.status not in _ONGOING_STATUSES
+        ):
+            await self._record_billing_event(
+                event_type="subscription_created",
+                description=f"Subscribed to {label}",
+                amount_cents=amount_cents,
+                **common,
+            )
+            return
+        if current.status == "canceled":
+            if previous is None or previous.status != "canceled" or not same_subscription:
+                await self._record_billing_event(
+                    event_type="subscription_canceled",
+                    description=f"Canceled {label}",
+                    **common,
+                )
+            return
+        if not (is_active and same_subscription and previous is not None):
+            return
+        if (previous.plan_id, previous.stripe_price_id) != (current.plan_id, current.stripe_price_id):
+            old_name, _, _, old_interval = await self._plan_details(
+                previous.plan_id, previous.stripe_price_id
+            )
+            await self._record_billing_event(
+                event_type="subscription_updated",
+                description=f"Changed plan from {_plan_label(old_name, old_interval)} to {label}",
+                amount_cents=amount_cents,
+                **common,
+            )
+        if current.cancel_at_period_end and not previous.cancel_at_period_end:
+            until = (
+                f"; access continues until {as_utc(current.current_period_end):%b %d, %Y}"
+                if current.current_period_end
+                else ""
+            )
+            await self._record_billing_event(
+                event_type="subscription_cancel_scheduled",
+                description=f"Cancellation scheduled for {label}{until}",
+                **common,
+            )
+        elif previous.cancel_at_period_end and not current.cancel_at_period_end:
+            await self._record_billing_event(
+                event_type="subscription_reactivated",
+                description=f"Scheduled cancellation of {label} withdrawn",
+                **common,
+            )
+
+    async def _record_invoice_event(
+        self, invoice: Any, event_type: str, subscription: UserSubscription | None
+    ) -> None:
+        invoice_id = _obj_get(invoice, "id")
+        if not invoice_id:
+            return
+        if subscription is None:
+            subscription_id = _obj_get(invoice, "subscription")
+            subscription = (
+                await self.session.execute(
+                    select(UserSubscription).where(
+                        UserSubscription.stripe_subscription_id == str(subscription_id)
+                    )
+                )
+            ).scalar_one_or_none()
+            if subscription is None:
+                return
+        plan_name, _, plan_currency, interval = await self._plan_details(
+            subscription.plan_id, subscription.stripe_price_id
+        )
+        label = _plan_label(plan_name, interval)
+        currency = str(_obj_get(invoice, "currency") or plan_currency or "usd")
+        common = {
+            "user_id": subscription.user_id,
+            "plan_name": plan_name,
+            "currency": currency,
+            "stripe_reference": str(invoice_id),
+            "dedupe": True,
+        }
+        if event_type == "invoice.payment_failed":
+            amount_due = _obj_get(invoice, "amount_due")
+            await self._record_billing_event(
+                event_type="payment_failed",
+                description=f"Payment failed for {label}",
+                amount_cents=int(amount_due) if amount_due is not None else None,
+                **common,
+            )
+            return
+        if event_type != "invoice.paid":
+            return
+        amount_paid = int(_obj_get(invoice, "amount_paid") or 0)
+        billing_reason = _obj_get(invoice, "billing_reason")
+        if billing_reason == "subscription_cycle":
+            await self._record_billing_event(
+                event_type="subscription_renewed",
+                description=f"Renewed {label}",
+                amount_cents=amount_paid,
+                **common,
+            )
+        elif billing_reason != "subscription_create" and amount_paid > 0:
+            # The first invoice is already represented by subscription_created;
+            # anything else charged mid-cycle (e.g. a plan-change proration).
+            await self._record_billing_event(
+                event_type="subscription_payment",
+                description=f"Payment for {label}",
+                amount_cents=amount_paid,
+                **common,
+            )
 
     async def _upsert_billing_account(
         self, user_id: uuid.UUID, stripe_customer_id: str

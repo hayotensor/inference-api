@@ -28,11 +28,12 @@ from app.core.config import settings
 from app.core.errors import bad_request
 from app.core.security import utcnow
 from app.db.models.referral import Referral
+from app.db.models.referral_code_alias import ReferralCodeAlias
 from app.db.models.referral_earning import ReferralEarning
 from app.db.models.user import User
 from app.db.models.wallet_transaction import WalletTransaction
 from app.db.session import async_session_maker
-from app.referrals.service import ReferralService
+from app.referrals.service import MAX_REFERRAL_CODE_ALIASES, ReferralService
 
 STARTER_PRICE_ID = "price_test_referral_starter_month"
 BUSINESS_PRICE_ID = "price_test_referral_business_month"
@@ -199,7 +200,7 @@ async def test_referral_code_is_generated_lazily_and_stable(client, verified_sig
     second = await _my_referral_summary(client, token)
     assert first["referral_code"] == second["referral_code"]
     assert len(first["referral_code"]) == 8
-    assert first["referral_link"] == f"{settings.app_url}/signup?ref={first['referral_code']}"
+    assert first["referral_link"] == f"{str(settings.app_url).rstrip('/')}/r/{first['referral_code']}"
     assert first["total_referrals"] == 0
     assert first["total_tokens_earned"] == 0
     assert first["recent_earnings"] == []
@@ -435,3 +436,153 @@ async def test_wallet_topup_by_a_referred_user_credits_the_referrer(
         assert len(earnings) == 1
         assert earnings[0].tokens_credited == bonus_tokens
         assert earnings[0].source_id == "pi_test_referred4_topup"
+
+
+# --- HYP-93: custom referral codes + /r/<code> short links -----------------
+
+
+async def _set_code(client, token: str, code: str):
+    return await client.put(
+        "/referrals/me/code", json={"code": code}, headers={"Authorization": f"Bearer {token}"}
+    )
+
+
+async def _referrer_of(referred_id: str) -> Referral | None:
+    async with async_session_maker() as session:
+        return (
+            await session.execute(
+                select(Referral).where(Referral.referred_user_id == uuid.UUID(referred_id))
+            )
+        ).scalar_one_or_none()
+
+
+async def test_set_custom_code_returns_short_link_and_attributes_signups(client, verified_signup):
+    referrer_id, token = await _register(client, "custom-referrer@example.com")
+    response = await _set_code(client, token, "  Anything-Custom_42 ")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["referral_code"] == "anything-custom_42"
+    assert body["referral_link"] == f"{str(settings.app_url).rstrip('/')}/r/anything-custom_42"
+    assert (await _my_referral_summary(client, token))["referral_code"] == "anything-custom_42"
+
+    # Lookup is case-insensitive, so a hand-typed /r/ANYTHING-CUSTOM_42 still counts.
+    referred_id, _ = await _register(
+        client, "custom-referred@example.com", referral_code="ANYTHING-Custom_42"
+    )
+    referral = await _referrer_of(referred_id)
+    assert referral is not None
+    assert str(referral.referrer_user_id) == referrer_id
+    assert referral.referral_code_used == "anything-custom_42"
+
+
+async def test_custom_code_can_be_set_before_one_was_ever_generated(client, verified_signup):
+    _, token = await _register(client, "custom-first@example.com")
+    response = await _set_code(client, token, "firstpick")
+    assert response.status_code == 200, response.text
+    async with async_session_maker() as session:
+        aliases = (await session.execute(select(ReferralCodeAlias))).scalars().all()
+        assert aliases == []
+
+
+async def test_old_code_keeps_attributing_after_changing_to_a_custom_one(client, verified_signup):
+    referrer_id, token = await _register(client, "changer@example.com")
+    old_code = (await _my_referral_summary(client, token))["referral_code"]
+    assert (await _set_code(client, token, "new-code")).status_code == 200
+
+    # A link shared before the change (either form hits the same register field).
+    referred_id, _ = await _register(client, "via-old-link@example.com", referral_code=old_code)
+    referral = await _referrer_of(referred_id)
+    assert referral is not None
+    assert str(referral.referrer_user_id) == referrer_id
+    assert referral.referral_code_used == old_code
+
+    # Nobody else can take the old code, but its owner can reclaim it.
+    _, other_token = await _register(client, "squatter@example.com")
+    taken = await _set_code(client, other_token, old_code.lower())
+    assert taken.status_code == 409, taken.text
+    assert taken.json()["detail"]["code"] == "referral_code_taken"
+    reclaimed = await _set_code(client, token, old_code)
+    assert reclaimed.status_code == 200, reclaimed.text
+    assert reclaimed.json()["referral_code"] == old_code.lower()
+    async with async_session_maker() as session:
+        aliases = (
+            await session.execute(
+                select(ReferralCodeAlias.code).where(
+                    ReferralCodeAlias.user_id == uuid.UUID(referrer_id)
+                )
+            )
+        ).scalars().all()
+        assert aliases == ["new-code"]
+
+
+async def test_taken_code_is_409_case_insensitively(client, verified_signup):
+    _, first_token = await _register(client, "owner-a@example.com")
+    _, second_token = await _register(client, "owner-b@example.com")
+    assert (await _set_code(client, first_token, "taken-code")).status_code == 200
+    for attempt in ("taken-code", "TAKEN-CODE", "Taken-Code"):
+        response = await _set_code(client, second_token, attempt)
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["code"] == "referral_code_taken"
+
+    # A generated (uppercase) code can't be shadowed by its lowercase spelling either.
+    generated = (await _my_referral_summary(client, second_token))["referral_code"]
+    response = await _set_code(client, first_token, generated.lower())
+    assert response.status_code == 409, response.text
+
+
+async def test_setting_your_own_current_code_again_is_a_noop(client, verified_signup):
+    _, token = await _register(client, "noop@example.com")
+    assert (await _set_code(client, token, "mine")).status_code == 200
+    again = await _set_code(client, token, "MINE")
+    assert again.status_code == 200, again.text
+    assert again.json()["referral_code"] == "mine"
+    async with async_session_maker() as session:
+        assert (await session.execute(select(ReferralCodeAlias))).scalars().all() == []
+
+
+@pytest.mark.parametrize(
+    ("code", "error_code"),
+    [
+        ("ab", "referral_code_invalid_length"),
+        ("a" * 33, "referral_code_invalid_length"),
+        ("has space", "referral_code_invalid_characters"),
+        ("emoji\u2728", "referral_code_invalid_characters"),
+        ("dots.dots", "referral_code_invalid_characters"),
+        ("-leading", "referral_code_invalid_characters"),
+        ("trailing_", "referral_code_invalid_characters"),
+        ("../admin", "referral_code_invalid_characters"),
+        ("admin", "referral_code_reserved"),
+        ("Signup", "referral_code_reserved"),
+    ],
+)
+async def test_invalid_or_reserved_codes_are_rejected(client, verified_signup, code, error_code):
+    _, token = await _register(client, f"invalid-{uuid.uuid4().hex[:8]}@example.com")
+    before = (await _my_referral_summary(client, token))["referral_code"]
+    response = await _set_code(client, token, code)
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"]["code"] == error_code
+    assert (await _my_referral_summary(client, token))["referral_code"] == before
+
+
+async def test_empty_or_oversized_payload_is_422(client, verified_signup):
+    _, token = await _register(client, "payload@example.com")
+    assert (await _set_code(client, token, "")).status_code == 422
+    assert (await _set_code(client, token, "x" * 65)).status_code == 422
+
+
+async def test_set_code_requires_auth(client):
+    response = await client.put("/referrals/me/code", json={"code": "anon-code"})
+    assert response.status_code == 401
+
+
+async def test_code_change_limit_caps_alias_accumulation(client, verified_signup):
+    _, token = await _register(client, "serial-changer@example.com")
+    await _my_referral_summary(client, token)  # generate the initial code
+    for index in range(MAX_REFERRAL_CODE_ALIASES):
+        response = await _set_code(client, token, f"code-{index}")
+        assert response.status_code == 200, response.text
+    over = await _set_code(client, token, "one-too-many")
+    assert over.status_code == 400, over.text
+    assert over.json()["detail"]["code"] == "referral_code_change_limit"
+    # Reclaiming one of your own previous codes doesn't grow the list, so it's still allowed.
+    assert (await _set_code(client, token, "code-0")).status_code == 200

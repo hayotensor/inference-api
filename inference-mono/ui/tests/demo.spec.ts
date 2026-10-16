@@ -4,12 +4,13 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import {
   adminApi, apiKeysApi, apiRequest, authApi, billingApi, clearSsoCookie,
-  referralsApi, redirectToStripeSession, syncSsoCookie, usageApi, userApi, walletsApi
+  modelsApi, referralsApi, redirectToStripeSession, syncSsoCookie, usageApi, userApi, walletsApi
 } from "../lib/api";
 import { authStore, AUTH_STORAGE_KEY, tokenResponseToSession } from "../lib/auth-store";
 import { DEMO_EMAIL, DEMO_PASSWORD } from "../lib/demo-mode";
 import { resetDemoState } from "../lib/demo/api";
 import { loadNextConfig } from "./next-config";
+import { referralSignupPath } from "../lib/referral-link";
 
 const originalFetch = globalThis.fetch;
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
@@ -76,6 +77,7 @@ test("every dashboard and admin read has sample data", async () => {
   const results = await Promise.all([
     usageApi.current(), usageApi.allowance(), usageApi.history(), usageApi.byModel(),
     billingApi.plans(), billingApi.subscription(), billingApi.walletBalance(), billingApi.walletBundles(),
+    billingApi.history(),
     referralsApi.me(), walletsApi.get(), apiKeysApi.list(), apiKeysApi.availableModels(),
     adminApi.roles(), adminApi.users(), adminApi.user(user.id), adminApi.apiKeys(),
     adminApi.billingPlans(), adminApi.auditLogs(), adminApi.statsOverview(), adminApi.statsUsage(),
@@ -113,6 +115,9 @@ test("billing, wallet, and admin user mutations are local and queries support fi
   expect((await billingApi.changePlan(plan.id, "year")).amount_cents).toBe(plan.annual_price_cents);
   expect((await usageApi.current()).stripe_allowance).toBe(plan.monthly_token_allowance);
   expect((await billingApi.cancel()).cancel_at_period_end).toBe(true);
+  const history = await billingApi.history({ limit: 2 });
+  expect(history.limit).toBe(2);
+  expect(history.data.map((event) => event.event_type)).toEqual(["subscription_cancel_scheduled", "subscription_updated"]);
   await walletsApi.syncBalances();
   await walletsApi.unlink();
   expect(await walletsApi.get()).toBeNull();
@@ -154,9 +159,36 @@ test("production config rejects the demo flag without starting Next.js", () => {
     .toThrow("UI demo mode is for local development only");
 });
 
+test("public model catalog works signed out and covers every category tab", async () => {
+  const catalog = await modelsApi.catalog();
+  expect(new Set(catalog.models.map((model) => model.category)).size).toBeGreaterThan(3);
+  expect(new Set(catalog.models.map((model) => model.status))).toEqual(new Set(["operational", "degraded", "down"]));
+  expect(catalog.models.every((model) => Number.isFinite(Number(model.token_multiplier)))).toBe(true);
+});
+
 test("referral URLs follow the current demo origin and custom port", async () => {
   await login();
-  expect((await referralsApi.me()).referral_link).toBe("http://localhost:3001/signup?ref=LOCALDEMO");
+  expect((await referralsApi.me()).referral_link).toBe("http://localhost:3001/r/LOCALDEMO");
+});
+
+test("custom referral codes are validated and produce /r/<code> links in demo mode", async () => {
+  await login();
+  const updated = await referralsApi.setCode({ code: " Anything-Custom " });
+  expect(updated.referral_code).toBe("anything-custom");
+  expect(updated.referral_link).toBe("http://localhost:3001/r/anything-custom");
+  expect((await referralsApi.me()).referral_code).toBe("anything-custom");
+  await expect(referralsApi.setCode({ code: "taken" })).rejects.toMatchObject({ status: 409 });
+  await expect(referralsApi.setCode({ code: "admin" })).rejects.toMatchObject({ status: 400 });
+  await expect(referralsApi.setCode({ code: "no spaces" })).rejects.toMatchObject({ status: 400 });
+  await expect(referralsApi.setCode({ code: "ab" })).rejects.toMatchObject({ status: 400 });
+});
+
+test("/r/<code> short links forward to the existing signup ?ref= flow", () => {
+  expect(referralSignupPath("anything-custom")).toBe("/signup?ref=anything-custom");
+  expect(referralSignupPath("FQIUN34")).toBe("/signup?ref=FQIUN34");
+  expect(referralSignupPath("%2e%2e%2Fadmin")).toBe("/signup");
+  expect(referralSignupPath("bad%zz")).toBe("/signup");
+  expect(referralSignupPath("x".repeat(33))).toBe("/signup");
 });
 
 test("server routes cannot contact the backend or alter a real SSO cookie in demo mode", async () => {

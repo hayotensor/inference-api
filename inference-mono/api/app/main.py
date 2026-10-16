@@ -16,6 +16,7 @@ from app.admin.routes import router as admin_router
 from app.api_keys.routes import router as api_keys_router
 from app.auth.routes import router as auth_router
 from app.billing.routes import router as billing_router
+from app.catalog.routes import router as catalog_router
 from app.core.config import settings
 from app.core.logging import configure_logging, request_id_ctx
 from app.core.rate_limit import ClientIPMiddleware, limiter
@@ -212,6 +213,7 @@ def create_app() -> FastAPI:
     app.include_router(api_keys_router)
     app.include_router(billing_router)
     app.include_router(wallets_router)
+    app.include_router(catalog_router)
     app.include_router(usage_router)
     app.include_router(referrals_router)
     app.include_router(internal_router)

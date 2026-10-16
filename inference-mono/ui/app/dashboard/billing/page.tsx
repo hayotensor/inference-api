@@ -5,11 +5,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeftRight, CreditCard, ExternalLink, Loader2, RefreshCw, Wallet, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
+import { AdminPagination } from "@/components/admin-common";
 import { BillingIntervalToggle } from "@/components/billing-interval-toggle";
 import { DashboardPageHeader } from "@/components/dashboard-shell";
-import { ErrorState, LoadingState } from "@/components/data-state";
+import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 import { StatusBadge, SubscriptionStatusBadge } from "@/components/status-badge";
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,7 +34,7 @@ import {
   billingApi,
   redirectToStripeSession
 } from "@/lib/api";
-import { formatDate, formatMoney, formatNumber } from "@/lib/format";
+import { formatDate, formatDateTime, formatMoney, formatNumber } from "@/lib/format";
 import {
   annualSavingsPercent,
   isStripeTestMode,
@@ -41,7 +42,32 @@ import {
   planIsPurchasable,
   planPriceCents
 } from "@/lib/stripe";
-import type { BillingInterval, WalletCheckoutRequest } from "@/lib/types";
+import type { BillingHistoryEventType, BillingInterval, WalletCheckoutRequest } from "@/lib/types";
+
+const HISTORY_PAGE_SIZE = 10;
+
+// HYP-91: label + badge colour per billing history event kind. Unknown kinds
+// (the API keeps event_type as free text) fall back to a neutral humanized label.
+const HISTORY_EVENT_LABELS: Record<string, { label: string; variant: BadgeProps["variant"] }> = {
+  subscription_created: { label: "Subscribed", variant: "success" },
+  subscription_renewed: { label: "Renewal", variant: "success" },
+  subscription_updated: { label: "Plan change", variant: "info" },
+  subscription_payment: { label: "Payment", variant: "success" },
+  subscription_cancel_scheduled: { label: "Cancellation scheduled", variant: "warning" },
+  subscription_reactivated: { label: "Renewal resumed", variant: "info" },
+  subscription_canceled: { label: "Canceled", variant: "warning" },
+  payment_failed: { label: "Payment failed", variant: "destructive" },
+  wallet_topup: { label: "Top-up", variant: "success" }
+};
+
+function historyEventLabel(eventType: BillingHistoryEventType) {
+  return (
+    HISTORY_EVENT_LABELS[eventType] ?? {
+      label: eventType.replace(/[_-]+/g, " ").replace(/^\w/, (char) => char.toUpperCase()),
+      variant: "secondary" as const
+    }
+  );
+}
 
 export default function BillingPage() {
   const queryClient = useQueryClient();
@@ -64,6 +90,12 @@ export default function BillingPage() {
   const walletBundlesQuery = useQuery({
     queryKey: ["wallet-bundles"],
     queryFn: billingApi.walletBundles
+  });
+  const [historyOffset, setHistoryOffset] = React.useState(0);
+  const historyQuery = useQuery({
+    queryKey: ["billing-history", { limit: HISTORY_PAGE_SIZE, offset: historyOffset }],
+    queryFn: ({ signal }) =>
+      billingApi.history({ limit: HISTORY_PAGE_SIZE, offset: historyOffset }, { signal })
   });
 
   const portalMutation = useMutation({
@@ -92,6 +124,7 @@ export default function BillingPage() {
     onSuccess: async () => {
       toast.success("Plan updated: The difference will be prorated");
       await queryClient.invalidateQueries({ queryKey: ["billing-subscription"] });
+      await queryClient.invalidateQueries({ queryKey: ["billing-history"] });
       await queryClient.invalidateQueries({ queryKey: ["usage-allowance"] });
     },
     onError: (error) => toast.error(apiErrorMessage(error))
@@ -104,6 +137,7 @@ export default function BillingPage() {
         : "the end of your current billing period";
       toast.success(`Renewal canceled. Your plan remains active until ${activeUntil}.`);
       await queryClient.invalidateQueries({ queryKey: ["billing-subscription"] });
+      await queryClient.invalidateQueries({ queryKey: ["billing-history"] });
     },
     onError: (error) => toast.error(apiErrorMessage(error))
   });
@@ -150,7 +184,13 @@ export default function BillingPage() {
         action={
           <div className="flex items-center gap-2">
             {isStripeTestMode ? <Badge variant="warning">Stripe test mode</Badge> : null}
-            <Button variant="outline" onClick={() => void subscriptionQuery.refetch()}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                void subscriptionQuery.refetch();
+                void historyQuery.refetch();
+              }}
+            >
               <RefreshCw />
               Refresh
             </Button>
@@ -187,17 +227,29 @@ export default function BillingPage() {
                     </span>
                   </span>
                 </div>
-                {[
-                  ["Plan", subscription.plan_name ?? "Free"],
-                  ["Period start", formatDate(subscription.current_period_start)],
-                  ["Period end", formatDate(subscription.current_period_end)],
-                  ["Cancel at period end", subscription.cancel_at_period_end ? "Yes" : "No"]
-                ].map(([label, value]) => (
-                  <div key={label} className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">{label}</span>
-                    <span className="max-w-[60%] truncate font-medium">{value}</span>
+                {hasActiveSubscription ? (
+                  [
+                    ["Plan", subscription.plan_name ?? "Free"],
+                    ["Period start", formatDate(subscription.current_period_start)],
+                    ["Period end", formatDate(subscription.current_period_end)],
+                    ["Cancel at period end", subscription.cancel_at_period_end ? "Yes" : "No"]
+                  ].map(([label, value]) => (
+                    <div key={label} className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">{label}</span>
+                      <span className="max-w-[60%] truncate font-medium">{value}</span>
+                    </div>
+                  ))
+                ) : (
+                  // HYP-87: no plan (never subscribed, canceled, or expired) -- the
+                  // plan name and period dates would only describe a plan that is
+                  // gone, so the row offers the way to get one instead.
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">Plan</span>
+                    <Button size="sm" className="h-7 px-3 text-xs" asChild>
+                      <a href="#plans">Choose</a>
+                    </Button>
                   </div>
-                ))}
+                )}
                 <div className="grid gap-2 pt-2 sm:grid-cols-2">
                   <Button
                     onClick={() => {
@@ -241,7 +293,7 @@ export default function BillingPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card id="plans" className="scroll-mt-24">
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -475,6 +527,72 @@ export default function BillingPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Billing history</CardTitle>
+          <CardDescription>
+            Subscription changes, renewals, cancellations, and pay-as-you-go top-ups.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {historyQuery.isLoading ? <LoadingState /> : null}
+          {historyQuery.isError ? (
+            <ErrorState error={historyQuery.error} onRetry={() => void historyQuery.refetch()} />
+          ) : null}
+          {historyQuery.data && historyQuery.data.data.length === 0 ? (
+            <EmptyState
+              title="No billing activity yet"
+              description="Subscription changes and top-ups will appear here."
+            />
+          ) : null}
+          {historyQuery.data && historyQuery.data.data.length > 0 ? (
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Details</TableHead>
+                    <TableHead className="text-right">Credits</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {historyQuery.data.data.map((event) => {
+                    const { label, variant } = historyEventLabel(event.event_type);
+                    return (
+                      <TableRow key={event.id}>
+                        <TableCell className="whitespace-nowrap">
+                          {formatDateTime(event.created_at)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={variant} className="whitespace-nowrap">
+                            {label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{event.description}</TableCell>
+                        <TableCell className="text-right">
+                          {event.tokens !== null ? formatNumber(event.tokens) : "\u2014"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {formatMoney(event.amount_cents, event.currency)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+              <AdminPagination
+                total={historyQuery.data.total}
+                limit={historyQuery.data.limit}
+                offset={historyQuery.data.offset}
+                onOffsetChange={setHistoryOffset}
+              />
+            </>
+          ) : null}
+        </CardContent>
+      </Card>
     </>
   );
 }

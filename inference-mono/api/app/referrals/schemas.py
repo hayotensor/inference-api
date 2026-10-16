@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ReferralEarningRead(BaseModel):
@@ -23,3 +23,11 @@ class ReferralSummaryRead(BaseModel):
     recent_earnings: list[ReferralEarningRead]
 
     model_config = {"from_attributes": True}
+
+
+class ReferralCodeUpdate(BaseModel):
+    """HYP-93: a user-chosen referral code. Loosely bounded here; the real
+    rules (3-32 chars of [a-z0-9_-], case-insensitive, not reserved) are
+    enforced in ReferralService so each failure gets its own error code."""
+
+    code: str = Field(min_length=1, max_length=64)

@@ -58,6 +58,17 @@ class UsageHistoryResponse(BaseModel):
     data: list[UsageEventRead]
 
 
+class UsageHourlyBucket(BaseModel):
+    hour: datetime
+    charged_tokens: int
+
+
+class UsageHourlyResponse(BaseModel):
+    period_start: datetime
+    period_end: datetime
+    data: list[UsageHourlyBucket]
+
+
 class UsageByModelRead(BaseModel):
     model: str
     request_count: int

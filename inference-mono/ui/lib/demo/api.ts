@@ -1,7 +1,7 @@
 import { DEMO_EMAIL, DEMO_PASSWORD, UI_DEMO_MODE } from "@/lib/demo-mode";
 import type { ApiKeyRead, BillingInterval, TokenResponse, UsageByModel } from "@/lib/types";
 import {
-  createDemoState, demoUserId, modelNames, ownerRole, referrals,
+  createDemoState, demoUserId, modelCatalog, modelNames, ownerRole, referrals,
   supportRole, timestamp, walletBundles
 } from "./fixtures";
 
@@ -52,6 +52,30 @@ function paginate<T extends object>(rows: T[], query: URLSearchParams) {
   return { data: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset };
 }
 
+// HYP-91: demo plan changes/cancellations show up in the billing history table.
+function recordBillingEvent(event_type: string, description: string, amount_cents: number | null = null) {
+  state.billingHistory.unshift({
+    id: `demo-billing-event-${Date.now()}-${state.billingHistory.length}`, event_type, description,
+    plan_name: state.subscription.plan_name, amount_cents, currency: "usd", tokens: null,
+    created_at: new Date().toISOString()
+  });
+}
+
+function usageHourly() {
+  const totals = new Map<string, number>();
+  for (const event of state.events) {
+    const hour = new Date(event.created_at);
+    hour.setUTCMinutes(0, 0, 0);
+    const key = hour.toISOString();
+    totals.set(key, (totals.get(key) ?? 0) + event.charged_tokens);
+  }
+  return {
+    period_start: state.usage.period_start,
+    period_end: state.usage.period_end,
+    data: [...totals].sort(([a], [b]) => a.localeCompare(b)).map(([hour, charged_tokens]) => ({ hour, charged_tokens }))
+  };
+}
+
 function byModel(): UsageByModel[] {
   return modelNames.map((model) => {
     const events = state.events.filter((event) => event.model === model);
@@ -80,6 +104,18 @@ function adminUsers() {
   } : user);
 }
 
+// Codes the demo pretends belong to someone else, so the 409 path is testable.
+const demoTakenReferralCodes = ["taken", "already-taken"];
+
+function referralSummary() {
+  const link = `/r/${state.referralCode}`;
+  return {
+    ...referrals,
+    referral_code: state.referralCode,
+    referral_link: typeof window === "undefined" ? link : new URL(link, window.location.origin).href
+  };
+}
+
 function handle(path: string, method: string, payload?: unknown): unknown {
   const url = new URL(path, "http://demo.local");
   const route = url.pathname;
@@ -101,6 +137,7 @@ function handle(path: string, method: string, payload?: unknown): unknown {
       return state.user;
     case "GET /api-keys": return state.keys;
     case "GET /api-keys/available-models": return modelNames;
+    case "GET /models": return { ...modelCatalog, generated_at: new Date().toISOString() };
     case "POST /api-keys": {
       const id = crypto.randomUUID();
       const apiKey: ApiKeyRead = {
@@ -117,6 +154,9 @@ function handle(path: string, method: string, payload?: unknown): unknown {
     case "GET /billing/plans": return state.plans.filter((plan) => plan.active && plan.visible);
     case "GET /billing/subscription": return state.subscription;
     case "POST /billing/subscription/cancel":
+      if (body.cancel_at_period_end && !state.subscription.cancel_at_period_end) {
+        recordBillingEvent("subscription_cancel_scheduled", `Cancellation scheduled for ${state.subscription.plan_name}`);
+      }
       state.subscription.cancel_at_period_end = Boolean(body.cancel_at_period_end);
       return state.subscription;
     case "POST /billing/subscription/change": {
@@ -130,16 +170,27 @@ function handle(path: string, method: string, payload?: unknown): unknown {
       });
       state.usage.stripe_allowance = plan.monthly_token_allowance;
       recalculateUsage();
+      recordBillingEvent("subscription_updated", `Changed plan to ${plan.name}`, state.subscription.amount_cents);
       return state.subscription;
     }
+    case "GET /billing/history": return paginate(state.billingHistory, url.searchParams);
     case "GET /billing/wallet": return { balance_tokens: 250_000 };
     case "GET /billing/wallet/bundles": return walletBundles;
-    case "GET /referrals/me": return {
-      ...referrals,
-      referral_link: typeof window === "undefined"
-        ? referrals.referral_link
-        : new URL(referrals.referral_link, window.location.origin).href
-    };
+    case "GET /referrals/me": return referralSummary();
+    case "PUT /referrals/me/code": {
+      // HYP-93: mirrors the backend's rules (app/referrals/service.py).
+      const code = String(body.code ?? "").trim().toLowerCase();
+      if (code.length < 3 || code.length > 32) throw new DemoError(400, "Referral code must be 3-32 characters.");
+      if (!/^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/.test(code)) {
+        throw new DemoError(400, "Referral code may only use letters, numbers, '-' and '_', and must start and end with a letter or number.");
+      }
+      if (["admin", "api", "signup", "login", "r", "referrals", "support", "talaris"].includes(code)) {
+        throw new DemoError(400, "That referral code is reserved.");
+      }
+      if (demoTakenReferralCodes.includes(code)) throw new DemoError(409, "That referral code is already taken.");
+      state.referralCode = code;
+      return referralSummary();
+    }
     case "GET /usage/current": return state.usage;
     case "POST /usage/recalculate": return recalculateUsage();
     case "GET /usage/allowance": return {
@@ -150,6 +201,7 @@ function handle(path: string, method: string, payload?: unknown): unknown {
       remaining_tokens: state.usage.remaining_tokens
     };
     case "GET /usage/history": return { data: paginate(state.events, url.searchParams).data };
+    case "GET /usage/hourly": return usageHourly();
     case "GET /usage/by-model": return paginate(byModel(), url.searchParams);
     case "GET /wallets/evm": return state.wallet;
     case "DELETE /wallets/evm": state.wallet = null; return null;

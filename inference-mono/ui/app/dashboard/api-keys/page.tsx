@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { AlertTriangle, Clipboard, KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, BookOpen, Clipboard, KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -124,15 +124,22 @@ export default function ApiKeysPage() {
         title="API keys"
         description="Manage your API keys."
         action={
-          <Button
-            onClick={() => {
-              createMutation.reset();
-              setShowCreate((value) => !value);
-            }}
-          >
-            <Plus />
-            Create key
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* HYP-88: placeholder until the API docs (HYP-34) exist. */}
+            <Button variant="outline" onClick={() => toast.info("API docs are coming soon.")}>
+              <BookOpen />
+              API docs
+            </Button>
+            <Button
+              onClick={() => {
+                createMutation.reset();
+                setShowCreate((value) => !value);
+              }}
+            >
+              <Plus />
+              Create key
+            </Button>
+          </div>
         }
       />
 

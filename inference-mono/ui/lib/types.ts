@@ -133,6 +133,10 @@ export interface ReferralSummary {
   recent_earnings: ReferralEarning[];
 }
 
+export interface ReferralCodeUpdate {
+  code: string;
+}
+
 export interface StripeSessionResponse {
   id?: string;
   url?: string;
@@ -154,6 +158,38 @@ export interface BillingSubscription {
   current_period_start: string | null;
   current_period_end: string | null;
   cancel_at_period_end: boolean;
+}
+
+// HYP-91: GET /billing/history. event_type is free text server-side; these are
+// the kinds the API currently emits.
+export type BillingHistoryEventType =
+  | "subscription_created"
+  | "subscription_updated"
+  | "subscription_renewed"
+  | "subscription_cancel_scheduled"
+  | "subscription_reactivated"
+  | "subscription_canceled"
+  | "subscription_payment"
+  | "payment_failed"
+  | "wallet_topup"
+  | (string & {});
+
+export interface BillingHistoryEvent {
+  id: UUID;
+  event_type: BillingHistoryEventType;
+  description: string;
+  plan_name: string | null;
+  amount_cents: number | null;
+  currency: string | null;
+  tokens: number | null;
+  created_at: string;
+}
+
+export interface BillingHistoryResponse {
+  data: BillingHistoryEvent[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface UsagePeriod {
@@ -197,6 +233,12 @@ export interface UsageEvent {
   status: string;
   created_at: string;
   settled_at: string | null;
+}
+
+export interface UsageHourlyResponse {
+  period_start: string;
+  period_end: string;
+  data: { hour: string; charged_tokens: number }[];
 }
 
 export interface UsageHistoryResponse {
@@ -534,4 +576,29 @@ export interface StatusPageResponse {
   groups: StatusGroup[];
   incidents: StatusIncident[];
   history_days: number;
+}
+
+// HYP-92: public model catalog from the control plane's `GET /models`
+// (api/app/catalog/routes.py). provider/family/category/parameter_size are
+// derived server-side from the model id (no stored modality metadata exists);
+// token_multiplier is the HYP-36 credit rate as a Decimal string.
+export type ModelCategory = "chat" | "reasoning" | "code" | "vision" | "embedding" | "audio";
+
+export interface CatalogModel {
+  id: string;
+  name: string;
+  label: string | null;
+  provider: string | null;
+  family: string | null;
+  category: ModelCategory;
+  parameter_size: string | null;
+  token_multiplier: string;
+  status: ModelServiceStatus;
+  healthy_miner_count: number;
+  registered_miner_count: number;
+}
+
+export interface ModelCatalogResponse {
+  generated_at: string;
+  models: CatalogModel[];
 }

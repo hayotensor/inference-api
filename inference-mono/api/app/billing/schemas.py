@@ -92,3 +92,23 @@ class WalletCheckoutSessionRequest(BaseModel):
 
 class WalletBalanceRead(BaseModel):
     balance_tokens: int
+
+
+class BillingHistoryEventRead(BaseModel):
+    id: uuid.UUID
+    event_type: str
+    description: str
+    plan_name: str | None = None
+    amount_cents: int | None = None
+    currency: str | None = None
+    tokens: int | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class BillingHistoryResponse(BaseModel):
+    data: list[BillingHistoryEventRead]
+    total: int
+    limit: int
+    offset: int

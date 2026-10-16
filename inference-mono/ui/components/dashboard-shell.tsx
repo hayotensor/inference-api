@@ -32,6 +32,7 @@ import { SiteFooter } from "@/components/site-footer";
 import { Button } from "@/components/ui/button";
 import { AuthGate, useAuth } from "@/lib/auth";
 import { AttestationProvider } from "@/lib/attestation";
+import { useDashboardLiveRefresh } from "@/lib/live-refresh";
 import { navPathMatches, usePendingNavPath } from "@/lib/pending-nav";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -169,6 +170,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [logoutConfirmOpen, setLogoutConfirmOpen] = React.useState(false);
   const logoutRequested = React.useRef(false);
   const accountTriggerRef = React.useRef<HTMLButtonElement | null>(null);
+  useDashboardLiveRefresh();
 
   const renderAccountMenu = (mobile: boolean) => (
     <DropdownMenu.Root>
@@ -317,7 +319,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </div>
         </aside>
 
-        <div className="lg:pl-64">
+        <div className="flex min-h-dvh flex-col lg:pl-64">
           {/* Desktop-only top bar: the sidebar carries logo/account chrome, so this
               strip exists solely to put Chat top-right, per HYP-52. */}
           <div className="pointer-events-auto sticky top-0 z-20 hidden items-center justify-end border-b border-border bg-background/85 px-6 py-3 backdrop-blur-[8px] lg:flex">
@@ -340,7 +342,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               {renderNav(true)}
             </nav>
           </header>
-          <main className="page-shell py-8 lg:py-12" aria-busy={isPending}>
+          <main className="page-shell flex-1 py-8 lg:py-12" aria-busy={isPending}>
             {/* Keep the route mounted so cancelling navigation preserves its state. */}
             <div hidden={isPending}>{children}</div>
             {isPending ? <PageLoadingState /> : null}

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_log
 from app.auth.dependencies import current_active_user
 from app.billing.plans import WALLET_TOPUP_BUNDLES
 from app.billing.schemas import (
+    BillingHistoryEventRead,
+    BillingHistoryResponse,
     BillingPlanRead,
     BillingSubscriptionRead,
     CancelSubscriptionRequest,
@@ -164,6 +166,24 @@ async def get_subscription(
     user: User = Depends(current_active_user),
 ) -> BillingSubscriptionRead:
     return BillingSubscriptionRead.model_validate(await BillingService(session).subscription_response(user))
+
+
+@router.get("/history", response_model=BillingHistoryResponse)
+@limiter.limit("60/minute")
+async def get_billing_history(
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user),
+) -> BillingHistoryResponse:
+    rows, total = await BillingService(session).billing_history(user, limit=limit, offset=offset)
+    return BillingHistoryResponse(
+        data=[BillingHistoryEventRead.model_validate(row) for row in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post("/subscription/change", response_model=BillingSubscriptionRead)

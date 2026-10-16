@@ -1,6 +1,6 @@
 import type {
   AdminAuditLog, AdminBillingPlan, AdminRole, AdminUserDetail, ApiKeyRead,
-  BillingSubscription, EvmWallet, ReferralSummary, StatusPageResponse,
+  BillingHistoryEvent, BillingSubscription, CatalogModel, EvmWallet, ModelCatalogResponse, ReferralSummary, StatusPageResponse,
   UsageEvent, UsagePeriod, User, WalletTopupBundle
 } from "@/lib/types";
 import { DEMO_EMAIL } from "@/lib/demo-mode";
@@ -97,6 +97,32 @@ const users: AdminUserDetail[] = [
     active_api_key_count: 0, updated_at: timestamp, roles: [], billing_status: "free",
     wallet_address: null, current_period_remaining_tokens: 100_000 }
 ];
+// HYP-91: sample `/billing/history`, newest first.
+const historyRow = (
+  index: number, days: number, event_type: string, description: string,
+  extra: Partial<BillingHistoryEvent> = {}
+): BillingHistoryEvent => ({
+  id: `demo-billing-event-${index}`, event_type, description, plan_name: plans[1].name,
+  amount_cents: null, currency: "usd", tokens: null, created_at: daysAgo(days), ...extra
+});
+const billingHistory: BillingHistoryEvent[] = [
+  historyRow(1, 2, "wallet_topup", "Pay-as-you-go top-up: 2,600,000 credits",
+    { plan_name: null, amount_cents: 2500, tokens: 2_600_000 }),
+  historyRow(2, 5, "subscription_renewed", `Renewed ${plans[1].name} (monthly)`, { amount_cents: plans[1].price_cents }),
+  historyRow(3, 18, "subscription_reactivated", `Scheduled cancellation of ${plans[1].name} (monthly) withdrawn`),
+  historyRow(4, 20, "subscription_cancel_scheduled", `Cancellation scheduled for ${plans[1].name} (monthly)`),
+  historyRow(5, 27, "wallet_topup", "Pay-as-you-go top-up: 1,000,000 credits",
+    { plan_name: null, amount_cents: 1000, tokens: 1_000_000 }),
+  historyRow(6, 35, "subscription_renewed", `Renewed ${plans[1].name} (monthly)`, { amount_cents: plans[1].price_cents }),
+  historyRow(7, 50, "subscription_payment", `Payment for ${plans[1].name} (monthly)`, { amount_cents: 1200 }),
+  historyRow(8, 52, "subscription_updated", `Changed plan from ${plans[2].name} (monthly) to ${plans[1].name} (monthly)`,
+    { amount_cents: plans[1].price_cents }),
+  historyRow(9, 58, "payment_failed", `Payment failed for ${plans[2].name} (monthly)`,
+    { plan_name: plans[2].name, amount_cents: plans[2].price_cents }),
+  historyRow(10, 60, "subscription_created", `Subscribed to ${plans[2].name} (monthly)`,
+    { plan_name: plans[2].name, amount_cents: plans[2].price_cents })
+];
+
 const auditLogs: AdminAuditLog[] = ["auth.login", "api_key.create", "admin.owner.bootstrap"].map((action, index) => ({
   id: `demo-audit-${index}`, user_id: user.id, actor_user_id: user.id, action, actor: user.email,
   target_type: "user", target_id: user.id, result: "success", request_id: `demo-audit-request-${index}`,
@@ -110,7 +136,7 @@ export const walletBundles: WalletTopupBundle[] = [
   { id: "topup_100", usd_cents: 10000, tokens: 11_200_000, currency: "usd" }
 ];
 export const referrals: ReferralSummary = {
-  referral_code: "LOCALDEMO", referral_link: "/signup?ref=LOCALDEMO",
+  referral_code: "LOCALDEMO", referral_link: "/r/LOCALDEMO",
   total_referrals: 3, total_tokens_earned: 30_000,
   recent_earnings: [1, 2, 3].map((index) => ({
     id: `demo-referral-${index}`, tokens_credited: 10_000, usd_equivalent_cents: 100, created_at: daysAgo(index)
@@ -127,8 +153,34 @@ export const statusPage: StatusPageResponse = {
   })) }]
 };
 
+// HYP-92: sample `/models` catalog. The two billed demo models come first so
+// usage/API-key fixtures stay consistent; the rest exercise every category tab
+// and availability state.
+const catalogRow = (
+  id: string, rest: Omit<CatalogModel, "id" | "name" | "label" | "healthy_miner_count" | "registered_miner_count">,
+  healthy: number, registered: number
+): CatalogModel => ({
+  id, name: id.split("/").pop() ?? id, label: null, ...rest,
+  healthy_miner_count: healthy, registered_miner_count: registered
+});
+export const modelCatalog: ModelCatalogResponse = {
+  generated_at: timestamp,
+  models: [
+    catalogRow(modelNames[0], { provider: "Meta", family: "Llama", category: "chat", parameter_size: "70B", token_multiplier: "2.0000", status: "operational" }, 4, 4),
+    catalogRow(modelNames[1], { provider: "Qwen", family: "Qwen", category: "chat", parameter_size: "32B", token_multiplier: "1.0000", status: "operational" }, 3, 3),
+    catalogRow("meta-llama/Llama-3.1-8B-Instruct", { provider: "Meta", family: "Llama", category: "chat", parameter_size: "8B", token_multiplier: "0.5000", status: "operational" }, 6, 6),
+    catalogRow("deepseek-ai/DeepSeek-R1-Distill-Llama-70B", { provider: "DeepSeek", family: "DeepSeek", category: "reasoning", parameter_size: "70B", token_multiplier: "2.5000", status: "operational" }, 2, 2),
+    catalogRow("Qwen/Qwen2.5-Coder-32B-Instruct", { provider: "Qwen", family: "Qwen", category: "code", parameter_size: "32B", token_multiplier: "1.0000", status: "degraded" }, 0, 1),
+    catalogRow("Qwen/Qwen2.5-VL-7B-Instruct", { provider: "Qwen", family: "Qwen", category: "vision", parameter_size: "7B", token_multiplier: "0.7500", status: "operational" }, 1, 2),
+    catalogRow("BAAI/bge-m3", { provider: "BAAI", family: "BGE", category: "embedding", parameter_size: null, token_multiplier: "0.1000", status: "down" }, 0, 0)
+  ]
+};
+
 // In-memory edits last until a full page reload. Never persist real-looking data
 // alongside the backend's data or accept a server token as a demo credential.
 export function createDemoState() {
-  return structuredClone({ user, keys, plans, subscription, events, usage, users, auditLogs, wallet: wallet as EvmWallet | null });
+  return structuredClone({
+    user, keys, plans, subscription, events, usage, users, auditLogs, wallet: wallet as EvmWallet | null,
+    referralCode: referrals.referral_code, billingHistory
+  });
 }

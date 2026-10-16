@@ -195,7 +195,7 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      <div className="lg:pl-72">
+      <div className="flex min-h-dvh flex-col lg:pl-72">
         <header className="pointer-events-auto sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur-[8px] lg:hidden">
           <div className="flex h-16 items-center justify-between px-4">
             <div className="flex items-center gap-2">
@@ -230,7 +230,7 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
             })}
           </nav>
         </header>
-        <main className="page-shell py-8 lg:py-12" aria-busy={isPending}>
+        <main className="page-shell flex-1 py-8 lg:py-12" aria-busy={isPending}>
           {/* Keep the route mounted so cancelling navigation preserves its state. */}
           <div hidden={isPending}>{children}</div>
           {isPending ? <PageLoadingState /> : null}

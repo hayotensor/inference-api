@@ -58,9 +58,9 @@ export default function PricingPage() {
   const annualAvailable = plans.some((plan) => planIsPurchasable(plan, "year"));
 
   return (
-    <div className="min-h-dvh bg-background">
+    <div className="flex min-h-dvh flex-col bg-background">
       <PublicNav />
-      <main className="page-shell py-12">
+      <main className="page-shell w-full flex-1 py-12">
         <div className="mb-8 flex flex-wrap items-end justify-between gap-6">
           <div className="max-w-2xl">
             {isStripeTestMode ? <Badge variant="warning">Stripe test mode</Badge> : null}

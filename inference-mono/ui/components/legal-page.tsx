@@ -18,9 +18,9 @@ export function LegalPage({
   sections: LegalSection[];
 }) {
   return (
-    <div className="min-h-dvh bg-background">
+    <div className="flex min-h-dvh flex-col bg-background">
       <PublicNav />
-      <main className="page-shell max-w-3xl py-12">
+      <main className="page-shell w-full flex-1 max-w-3xl py-12">
         <p className="eyebrow">Legal</p>
         <h1 className="mt-2 font-display text-[32px] font-medium leading-10 tracking-display">
           {title}

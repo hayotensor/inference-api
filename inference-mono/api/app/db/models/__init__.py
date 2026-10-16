@@ -4,6 +4,7 @@ from app.db.models.admin_role_permission import AdminRolePermission
 from app.db.models.api_key import APIKey, APIKeyEnvironment
 from app.db.models.api_key_usage import APIKeyUsage
 from app.db.models.audit_log import AuditLog
+from app.db.models.billing_event import BillingEvent
 from app.db.models.billing_plan import BillingPlan
 from app.db.models.crypto_balance_snapshot import CryptoBalanceSnapshot
 from app.db.models.email_verification_token import EmailVerificationToken
@@ -18,6 +19,7 @@ from app.db.models.oauth_account import OAuthAccount
 from app.db.models.password_reset_token import PasswordResetToken
 from app.db.models.phone_verification_code import PhoneVerificationCode, PhoneVerificationPurpose
 from app.db.models.referral import Referral
+from app.db.models.referral_code_alias import ReferralCodeAlias
 from app.db.models.referral_earning import ReferralEarning
 from app.db.models.refresh_token import RefreshToken
 from app.db.models.service_client import ServiceClient, ServiceClientRole
@@ -38,6 +40,7 @@ __all__ = [
     "AdminRole",
     "AdminRolePermission",
     "AuditLog",
+    "BillingEvent",
     "BillingPlan",
     "CryptoBalanceSnapshot",
     "EmailVerificationToken",
@@ -57,6 +60,7 @@ __all__ = [
     "PhoneVerificationCode",
     "PhoneVerificationPurpose",
     "Referral",
+    "ReferralCodeAlias",
     "ReferralEarning",
     "RefreshToken",
     "ServiceClient",

@@ -217,18 +217,30 @@ export default function DashboardPage() {
                     cancelAtPeriodEnd={subscriptionQuery.data.cancel_at_period_end}
                   />
                 </div>
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="text-muted-foreground">Plan</span>
-                  <span className="font-medium">
-                    {subscriptionQuery.data.plan_name ?? "No paid plan"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="text-muted-foreground">Period end</span>
-                  <span className="font-medium">
-                    {formatDate(subscriptionQuery.data.current_period_end)}
-                  </span>
-                </div>
+                {["active", "trialing", "past_due"].includes(subscriptionQuery.data.status) ? (
+                  <>
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-muted-foreground">Plan</span>
+                      <span className="font-medium">
+                        {subscriptionQuery.data.plan_name ?? "No paid plan"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-muted-foreground">Period end</span>
+                      <span className="font-medium">
+                        {formatDate(subscriptionQuery.data.current_period_end)}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  // HYP-87: same as Billing -- no plan means the plan row offers one.
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-muted-foreground">Plan</span>
+                    <Button size="sm" className="h-7 px-3 text-xs" asChild>
+                      <Link href="/dashboard/billing#plans">Choose</Link>
+                    </Button>
+                  </div>
+                )}
                 <Button className="w-full" asChild>
                   <Link href="/dashboard/billing">
                     <CreditCard />

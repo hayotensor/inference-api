@@ -64,9 +64,9 @@ export default function StatusPage() {
   const ongoing = data?.incidents.filter((i) => i.resolved_at === null) ?? [];
 
   return (
-    <div className="min-h-dvh bg-background">
+    <div className="flex min-h-dvh flex-col bg-background">
       <PublicNav />
-      <main className="page-shell max-w-4xl py-12">
+      <main className="page-shell w-full flex-1 max-w-4xl py-12">
         <h1 className="text-3xl font-semibold tracking-normal sm:text-4xl">Talaris Status</h1>
         <p className="mt-3 text-muted-foreground">
           Live health of every Talaris component, probed every minute, with up to 90 days of

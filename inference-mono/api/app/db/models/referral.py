@@ -12,7 +12,8 @@ from app.db.base import Base
 
 class Referral(Base):
     """HYP-65: attribution linking a referred signup to the user whose
-    referral link (``{app_url}/signup?ref=<referral_code>``) they signed up
+    referral link (``{app_url}/r/<referral_code>``, or the older
+    ``{app_url}/signup?ref=<referral_code>`` form) they signed up
     through. Recorded once, at signup time, and never changes afterward --
     `referred_user_id` is unique, so a user can be attributed to a referrer
     at most once, ever.
@@ -38,7 +39,7 @@ class Referral(Base):
     # referrer_user_id.referral_code today -- a user's own code is never
     # reissued, but this keeps the historical record self-contained if that
     # ever changes.
-    referral_code_used: Mapped[str] = mapped_column(String(16), nullable=False)
+    referral_code_used: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True, nullable=False
     )
