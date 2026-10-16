@@ -98,7 +98,7 @@ export default function DashboardPage() {
         action={
           <Button variant="outline" onClick={() => void usageQuery.refetch()}>
             <RefreshCw />
-            Refresh usage
+            Refresh
           </Button>
         }
       />
