@@ -204,10 +204,13 @@ export function AttestationBadge() {
               </ul>
             </div>
           ) : null}
-          <p>Automatically re-checked every 6 hours while this page is open.</p>
-          <Button variant="outline" disabled={isFetching} onClick={() => void refetch({ cancelRefetch: false })}>
-            {isFetching ? "Checking…" : "Check now"}
-          </Button>
+          <p>Automatically re-checks every 6 hours while this page is open.</p>
+          <p>
+            To perform remote attestation yourself, see the{" "}
+            <a href="#" className="focus-ring text-foreground underline underline-offset-4">
+              API documentation
+            </a>.
+          </p>
         </div>
       </DialogContent>
     </Dialog>
