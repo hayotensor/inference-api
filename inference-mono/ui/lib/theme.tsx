@@ -6,8 +6,8 @@ import * as React from "react";
  * Dark/light toggle for the dashboard.
  *
  * The brand kit is dark-only by rule -- it specs no light surface -- so this
- * is a self-designed addition, not a ported one. `app/globals.css` inverts the
- * monochrome ramp under `.light`; this provider just tracks which class is on
+ * is a self-designed addition, not a ported one. `app/globals.css` adjusts the
+ * neutral ramp and status accents under `.light`; this provider tracks which class is on
  * `<html>` and persists the pick. No `next-themes` dependency: the app has
  * exactly two themes and no `dark:` utility variants to gate, so a class swap
  * plus localStorage is the whole feature.

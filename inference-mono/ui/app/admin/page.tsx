@@ -9,6 +9,7 @@ import { useAdmin } from "@/components/admin-shell";
 import { ErrorState, LoadingState } from "@/components/data-state";
 import { StatCard } from "@/components/stat-card";
 import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -165,9 +166,7 @@ export default function AdminOverviewPage() {
                       <TableCell className="font-medium">{log.action}</TableCell>
                       <TableCell>{log.target_type ?? "system"}</TableCell>
                       <TableCell>
-                        <Badge variant={log.result === "success" ? "success" : "destructive"}>
-                          {log.result}
-                        </Badge>
+                        <StatusBadge status={log.result} />
                       </TableCell>
                       <TableCell>{formatDateTime(log.created_at)}</TableCell>
                     </TableRow>

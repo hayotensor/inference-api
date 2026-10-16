@@ -20,6 +20,7 @@ import {
 import { useAdmin } from "@/components/admin-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -219,9 +220,7 @@ export default function AdminApiKeysPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={revoked || expired ? "destructive" : "success"}>
-                          {revoked ? "revoked" : expired ? "expired" : "active"}
-                        </Badge>
+                        <StatusBadge status={revoked ? "revoked" : expired ? "expired" : "active"} />
                       </TableCell>
                       <TableCell>{formatDateTime(apiKey.last_used_at)}</TableCell>
                       <TableCell>

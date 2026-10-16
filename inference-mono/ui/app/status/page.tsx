@@ -7,9 +7,11 @@ import { Activity, CircleCheck, CircleSlash, TriangleAlert } from "lucide-react"
 import { ErrorState, LoadingState } from "@/components/data-state";
 import { PublicNav } from "@/components/public-nav";
 import { SiteFooter } from "@/components/site-footer";
-import { Badge, type BadgeProps } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/format";
+import { getStatusVariant, statusStyles } from "@/lib/status";
+import { cn } from "@/lib/utils";
 import type {
   ModelServiceStatus,
   StatusComponent,
@@ -17,30 +19,27 @@ import type {
   StatusIncident,
   StatusPageResponse
 } from "@/lib/types";
+import styles from "./status.module.css";
 
 // HYP-58: per-model status page (see status.openrouter.ai for the pattern):
 // a live snapshot plus a 30-day uptime bar per model. History is sampled by
 // the Next.js server (lib/server/status-history.ts) since the inference-api
 // only exposes the current state; latency is not shown for the same reason.
 //
-// The brand kit has no status-color hue ramp (see components/ui/badge.tsx's
-// header comment: variants are a *weight* ladder, not red/green/amber), so
-// this reuses that same ladder instead of inventing traffic-light colors:
-// operational -> `success` (the ladder's one affirmative/filled state),
-// degraded -> `warning`, down -> `destructive` (heaviest border = most
-// attention). Each also gets a distinct icon SHAPE so status never depends on
-// color alone.
+// Shared status accents plus distinct icon shapes and text labels keep service
+// health consistent with the dashboard without relying on color alone.
 
-const STATUS_COPY: Record<ModelServiceStatus, { label: string; badge: BadgeProps["variant"] }> = {
-  operational: { label: "Operational", badge: "success" },
-  degraded: { label: "Degraded", badge: "warning" },
-  down: { label: "Down", badge: "destructive" }
+const STATUS_LABELS: Record<ModelServiceStatus, string> = {
+  operational: "Operational",
+  degraded: "Degraded",
+  down: "Down"
 };
 
 function StatusIcon({ status, className }: { status: ModelServiceStatus; className?: string }) {
-  if (status === "operational") return <CircleCheck className={className} strokeWidth={1.5} />;
-  if (status === "degraded") return <TriangleAlert className={className} strokeWidth={1.5} />;
-  return <CircleSlash className={className} strokeWidth={1.5} />;
+  const classes = cn(statusStyles[getStatusVariant(status)].text, className);
+  if (status === "operational") return <CircleCheck className={classes} strokeWidth={1.5} />;
+  if (status === "degraded") return <TriangleAlert className={classes} strokeWidth={1.5} />;
+  return <CircleSlash className={classes} strokeWidth={1.5} />;
 }
 
 const OVERALL_COPY: Record<ModelServiceStatus, string> = {
@@ -84,14 +83,12 @@ export default function StatusPage() {
             <Card className="mt-8">
               <CardContent className="flex flex-wrap items-center justify-between gap-4 py-5">
                 <div className="flex items-center gap-3">
-                  <StatusIcon status={data.overall_status} className="h-5 w-5 text-foreground" />
+                  <StatusIcon status={data.overall_status} className="h-5 w-5" />
                   <span className="font-display text-lg font-medium tracking-display">
                     {OVERALL_COPY[data.overall_status]}
                   </span>
                 </div>
-                <Badge variant={STATUS_COPY[data.overall_status].badge}>
-                  {STATUS_COPY[data.overall_status].label}
-                </Badge>
+                <StatusBadge status={data.overall_status}>{STATUS_LABELS[data.overall_status]}</StatusBadge>
               </CardContent>
             </Card>
 
@@ -166,7 +163,7 @@ function IncidentRow({ incident }: { incident: StatusIncident }) {
     <Card>
       <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
         <div className="flex items-center gap-3">
-          <StatusIcon status={incident.status} className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <StatusIcon status={incident.status} className="h-4 w-4 shrink-0" />
           <div>
             <div className="text-sm">
               {incident.component_name}: {incident.status === "down" ? "outage" : "degraded performance"}
@@ -177,9 +174,9 @@ function IncidentRow({ incident }: { incident: StatusIncident }) {
             </div>
           </div>
         </div>
-        <Badge variant={ongoing ? STATUS_COPY[incident.status].badge : "outline"}>
+        <StatusBadge status={ongoing ? incident.status : "resolved"}>
           {ongoing ? "Ongoing" : "Resolved"}
-        </Badge>
+        </StatusBadge>
       </CardContent>
     </Card>
   );
@@ -190,7 +187,7 @@ function UptimeBar({ history, uptime }: { history: StatusHistoryDay[]; uptime: n
     <div className="w-full overflow-x-auto">
       <div className="min-w-max">
         <svg
-          className="block"
+          className={cn("block", styles.uptimeBar)}
           width={Math.max(0, history.length * 5 - 2)}
           height={32}
           role="img"
@@ -205,22 +202,13 @@ function UptimeBar({ history, uptime }: { history: StatusHistoryDay[]; uptime: n
               width={d.status === "down" ? 2 : 3}
               height={d.status === "down" ? 31 : 32}
               strokeWidth={1}
-              // Weight ladder, not traffic lights: solid = operational,
-              // half-tone = degraded, hollow outline = down, faint = no data.
-              className={
-                d.status === "operational"
-                  ? "fill-foreground"
-                  : d.status === "degraded"
-                    ? "fill-foreground/50"
-                    : d.status === "down"
-                      ? "fill-none stroke-foreground"
-                      : "fill-border"
-              }
+              // Outages also have a hollow shape; missing samples stay neutral.
+              className={statusStyles[getStatusVariant(d.status ?? "unknown")].indicator}
             >
               <title>
                 {d.status === null
                   ? `${d.day}: no data`
-                  : `${d.day}: ${STATUS_COPY[d.status].label}, ${((d.uptime ?? 0) * 100).toFixed(1)}% up`}
+                  : `${d.day}: ${STATUS_LABELS[d.status]}, ${((d.uptime ?? 0) * 100).toFixed(1)}% up`}
               </title>
             </rect>
           ))}
@@ -236,13 +224,12 @@ function UptimeBar({ history, uptime }: { history: StatusHistoryDay[]; uptime: n
 }
 
 function ComponentRow({ component, days }: { component: StatusComponent; days: number }) {
-  const copy = STATUS_COPY[component.status];
   return (
     <Card>
       <CardContent className="space-y-3 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <StatusIcon status={component.status} className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <StatusIcon status={component.status} className="h-4 w-4 shrink-0" />
             <div>
               <div className="font-mono text-sm">{component.name}</div>
               {component.description || component.latency_ms !== null ? (
@@ -254,7 +241,7 @@ function ComponentRow({ component, days }: { component: StatusComponent; days: n
               ) : null}
             </div>
           </div>
-          <Badge variant={copy.badge}>{copy.label}</Badge>
+          <StatusBadge status={component.status}>{STATUS_LABELS[component.status]}</StatusBadge>
         </div>
         <UptimeBar history={component.history} uptime={component.uptime} />
       </CardContent>

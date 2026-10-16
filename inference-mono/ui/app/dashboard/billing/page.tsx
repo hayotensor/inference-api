@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { BillingIntervalToggle } from "@/components/billing-interval-toggle";
 import { DashboardPageHeader } from "@/components/dashboard-shell";
 import { ErrorState, LoadingState } from "@/components/data-state";
+import { StatusBadge, SubscriptionStatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -147,9 +148,10 @@ export default function BillingPage() {
               <div className="space-y-4 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">Status</span>
-                  <Badge variant={subscription.status === "active" ? "success" : "outline"}>
-                    {subscription.status}
-                  </Badge>
+                  <SubscriptionStatusBadge
+                    status={subscription.status}
+                    cancelAtPeriodEnd={subscription.cancel_at_period_end}
+                  />
                 </div>
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="text-muted-foreground">Price</span>
@@ -289,7 +291,7 @@ export default function BillingPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           {current ? (
-                            <Badge variant="success">Current</Badge>
+                            <StatusBadge status="current" />
                           ) : isFree ? (
                             <span className="text-sm text-muted-foreground">Included</span>
                           ) : !purchasable ? (

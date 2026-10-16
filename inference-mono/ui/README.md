@@ -4,6 +4,33 @@ Standalone Next.js frontend for the FastAPI backend in `../api` and the TEE infe
 
 The UI is intentionally isolated from backend implementation details. Account, auth, billing, and admin calls use `NEXT_PUBLIC_API_BASE_URL`; inference playground calls use `NEXT_PUBLIC_INFERENCE_API_BASE_URL`.
 
+## Status accents
+
+Status colors use muted text, tinted backgrounds, and matching borders defined
+in `app/globals.css`, with separate dark and light values. Tailwind exposes
+`success`, `warning`, `destructive`, and `info` tokens. Neutral surfaces,
+typography, and primary actions retain the existing theme.
+
+| Accent | Meaning | Example statuses |
+| --- | --- | --- |
+| Green (`success`) | Healthy or successful | Active, paid, verified, operational, resolved |
+| Amber (`warning`) | Attention or an intentional stop | Canceled, canceling, past due, paused, expired, revoked, unverified |
+| Red (`destructive`) | Failure or unavailable | Failed, error, unpaid, incomplete expired, down |
+| Blue (`info`) | Informational or in progress | Trialing, pending, processing, checking, reserved |
+| Gray (`secondary`) | No active state or unknown | Free, disconnected, released, unknown values |
+
+Use `<StatusBadge status={value} />` for status labels. It resolves colors through
+`lib/status.ts` and makes underscore-separated values readable. Custom label text
+can be passed as children. Add new status mappings there, rather than choosing
+variants in each page. Use `SubscriptionStatusBadge` for subscriptions: scheduled
+cancellation adds an amber notice alongside the current subscription status.
+Status icons and history indicators also use the shared `statusStyles` mapping.
+Always retain a visible label or icon shape so color is not the only signal.
+
+Use plain `Badge` variants for metadata and explicit notices such as Stripe test
+mode. Roles, model names, and other metadata remain neutral. Destructive actions,
+error states, and toast icons use the same semantic palette.
+
 ## Local setup
 
 ### UI only (no backend services)

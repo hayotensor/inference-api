@@ -25,8 +25,8 @@ export function ErrorState({
   onRetry?: () => void;
 }) {
   return (
-    <div className="flex min-h-40 flex-col items-center justify-center gap-3 rounded-lg border border-border-strong bg-card p-8 text-center">
-      <AlertCircle className="h-5 w-5 text-foreground" strokeWidth={1.5} />
+    <div className="flex min-h-40 flex-col items-center justify-center gap-3 rounded-lg border border-destructive-border bg-card p-8 text-center">
+      <AlertCircle className="h-5 w-5 text-destructive" strokeWidth={1.5} />
       <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
         {apiErrorMessage(error)}
       </p>

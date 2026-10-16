@@ -2,11 +2,9 @@ import { darkTheme, lightTheme, type Theme } from "@rainbow-me/rainbowkit";
 
 /**
  * RainbowKit's default theme is a blue/gradient look that clashes with the
- * Talaris brand kit, which is deliberately monochrome (see app/globals.css's
- * header comment: one ramp from Void Black to Off-White, Eggshell as the
- * only accent, no chromatic or status hues). These mirror the kit's
- * `--primary` swap so the connect modal reads as part of the same product
- * instead of a bolted-on widget.
+ * Talaris neutral surfaces and Eggshell primary actions. These mirror the
+ * `--primary` swap so the connect modal reads as part of the same product.
+ * Semantic accent colors are reserved for status indicators.
  */
 export const rainbowKitDarkTheme: Theme = darkTheme({
   accentColor: "#EDE8E7", // --eggshell, the dark-mode primary fill

@@ -11,7 +11,7 @@ import { z } from "zod";
 
 import { AdminConfirmDialog } from "@/components/admin-common";
 import { DashboardPageHeader } from "@/components/dashboard-shell";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -202,9 +202,7 @@ export default function SettingsPage() {
             <div className="grid gap-4 text-sm sm:grid-cols-2">
               <div className="rounded-lg border bg-muted/30 p-3">
                 <p className="text-muted-foreground">Email status</p>
-                <Badge className="mt-2" variant={user?.is_verified ? "success" : "warning"}>
-                  {user?.is_verified ? "verified" : "unverified"}
-                </Badge>
+                <StatusBadge className="mt-2" status={user?.is_verified ? "verified" : "unverified"} />
               </div>
               <div className="rounded-lg border bg-muted/30 p-3">
                 <p className="text-muted-foreground">Created</p>

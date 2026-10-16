@@ -21,6 +21,7 @@ import {
 import { useAdmin } from "@/components/admin-shell";
 import { ErrorState, LoadingState } from "@/components/data-state";
 import { Badge } from "@/components/ui/badge";
+import { StatusBadge, SubscriptionStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -358,9 +359,7 @@ export default function AdminUserDetailPage() {
               <ReadOnlyField
                 label="Status"
                 value={
-                  <Badge variant={user.is_active ? "success" : "destructive"}>
-                    {user.is_active ? "active" : "disabled"}
-                  </Badge>
+                  <StatusBadge status={user.is_active ? "active" : "disabled"} />
                 }
               />
               <ReadOnlyField label="Created" value={formatDateTime(user.created_at)} />
@@ -469,9 +468,7 @@ export default function AdminUserDetailPage() {
                         {apiKey.prefix}...{apiKey.last_four}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={apiKey.revoked_at ? "destructive" : "success"}>
-                          {apiKey.revoked_at ? "revoked" : "active"}
-                        </Badge>
+                        <StatusBadge status={apiKey.revoked_at ? "revoked" : "active"} />
                       </TableCell>
                       <TableCell>{formatDateTime(apiKey.last_used_at)}</TableCell>
                       <TableCell className="text-right">
@@ -506,7 +503,15 @@ export default function AdminUserDetailPage() {
             {billingQuery.data ? (
               <>
                 <FieldGrid>
-                  <ReadOnlyField label="Status" value={billingQuery.data.status} />
+                  <ReadOnlyField
+                    label="Status"
+                    value={
+                      <SubscriptionStatusBadge
+                        status={billingQuery.data.status}
+                        cancelAtPeriodEnd={billingQuery.data.cancel_at_period_end}
+                      />
+                    }
+                  />
                   <ReadOnlyField label="Plan" value={billingQuery.data.plan_name} />
                   <ReadOnlyField label="Stripe customer" value={billingQuery.data.stripe_customer_id} />
                   <ReadOnlyField label="Subscription" value={billingQuery.data.stripe_subscription_id} />

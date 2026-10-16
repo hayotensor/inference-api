@@ -20,6 +20,7 @@ import {
 import { useAdmin } from "@/components/admin-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -294,9 +295,7 @@ export default function AdminBillingPlansPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
-                        <Badge variant={plan.active ? "success" : "destructive"}>
-                          {plan.active ? "active" : "inactive"}
-                        </Badge>
+                        <StatusBadge status={plan.active ? "active" : "inactive"} />
                         <Badge variant={plan.visible ? "secondary" : "outline"}>
                           {plan.visible ? "visible" : "hidden"}
                         </Badge>

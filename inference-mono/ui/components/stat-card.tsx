@@ -7,10 +7,9 @@ import { cn } from "@/lib/utils";
  * Talaris stat tile.
  *
  * The kit gives cards an eyebrow + index row over a thin rule, then the
- * content. There are no tone colors here by design -- the old blue/green/amber
- * icon chips are gone, because the system has no chromatic accents and no
- * status hues. The icon is a Warm Gray line glyph; the figure is the only
- * thing at full Off-White, which is what makes it read first.
+ * content. Stats use neutral colors so semantic accents remain reserved for
+ * statuses. The icon is a Warm Gray line glyph; the figure has the strongest
+ * contrast, which is what makes it read first.
  *
  * `emphasis` promotes a single tile in a row (the one figure that matters most
  * on the page) by inverting it to the Eggshell fill. Use it sparingly -- one

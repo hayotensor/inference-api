@@ -1,0 +1,14 @@
+/* GitHub Status-inspired graph colors, scoped to the uptime SVG so badges
+   and the rest of the app retain the shared semantic palette. */
+.uptimeBar {
+  --success: 133.85 62.40% 50.98%; /* #34d058 */
+  --warning: 42.22 74.31% 57.25%; /* #e3b341 */
+  --destructive: 2.74 92.59% 62.94%; /* #f85149 */
+}
+
+/* Match githubstatus.com on light surfaces; use brighter tones above for dark. */
+:global(:root.light) .uptimeBar {
+  --success: 133.70 61.35% 40.59%; /* #28a745 */
+  --warning: 46.29 92.11% 44.71%; /* #dbab09 */
+  --destructive: 354.25 70.46% 53.53%; /* #dc3545 */
+}

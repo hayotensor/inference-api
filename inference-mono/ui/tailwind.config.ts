@@ -43,7 +43,24 @@ const config: Config = {
         },
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
-          foreground: "hsl(var(--destructive-foreground))"
+          foreground: "hsl(var(--destructive-foreground))",
+          background: "hsl(var(--destructive-background))",
+          border: "hsl(var(--destructive-border))"
+        },
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          background: "hsl(var(--success-background))",
+          border: "hsl(var(--success-border))"
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          background: "hsl(var(--warning-background))",
+          border: "hsl(var(--warning-border))"
+        },
+        info: {
+          DEFAULT: "hsl(var(--info))",
+          background: "hsl(var(--info-background))",
+          border: "hsl(var(--info-border))"
         },
         muted: {
           DEFAULT: "hsl(var(--muted))",

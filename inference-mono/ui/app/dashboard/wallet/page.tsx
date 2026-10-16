@@ -10,7 +10,7 @@ import { AdminConfirmDialog } from "@/components/admin-common";
 import { DashboardPageHeader } from "@/components/dashboard-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 import { NoWalletNotice } from "@/components/no-wallet-notice";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { WalletConnectButton } from "@/components/wallet-connect-button";
 import {
@@ -106,9 +106,7 @@ export default function WalletPage() {
             <div className="rounded-lg border bg-muted/35 p-4">
               <div className="flex items-center justify-between gap-4">
                 <span className="text-sm text-muted-foreground">Connected wallet</span>
-                <Badge variant={isConnected ? "success" : "outline"}>
-                  {isConnected ? "connected" : "not connected"}
-                </Badge>
+                <StatusBadge status={isConnected ? "connected" : "not_connected"} />
               </div>
               <p className="mt-2 break-all font-mono text-sm">
                 {address ?? "Connect a wallet to continue"}

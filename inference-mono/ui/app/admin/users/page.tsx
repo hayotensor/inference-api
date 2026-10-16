@@ -15,7 +15,7 @@ import {
 } from "@/components/admin-common";
 import { useAdmin } from "@/components/admin-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -156,14 +156,10 @@ export default function AdminUsersPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={user.is_active ? "success" : "destructive"}>
-                        {user.is_active ? "active" : "disabled"}
-                      </Badge>
+                      <StatusBadge status={user.is_active ? "active" : "disabled"} />
                     </TableCell>
                     <TableCell>
-                      <Badge variant={user.is_verified ? "success" : "outline"}>
-                        {user.is_verified ? "verified" : "unverified"}
-                      </Badge>
+                      <StatusBadge status={user.is_verified ? "verified" : "unverified"} />
                     </TableCell>
                     <TableCell>
                       {user.active_api_key_count}/{user.api_key_count}

@@ -6,11 +6,10 @@
    Talaris — dashboard theme
    ------------------------------------------------------------------------
    Ported from the Talaris Design System (`colors_and_type.css` + the brand
-   rulebook in its README). The system is monochrome by rule: a single ramp
-   from Void Black to Off-White, with Eggshell as the one warm accent and the
-   sole action fill. There are no chromatic accents and no semantic status
-   colors -- state is carried by border weight, fill swap, and tone, never by
-   hue.
+   rulebook in its README). Neutral surfaces run from Void Black to Off-White,
+   with Eggshell for primary actions. Muted semantic accents communicate state:
+   green = success, amber = attention, red = failure, blue = information.
+   Status labels and icons always accompany color.
 
    The shadcn/ui semantic names below are kept (`--background`, `--muted`,
    `--primary`, ...) so every existing `bg-background` / `text-muted-foreground`
@@ -57,10 +56,23 @@
     --accent: var(--charcoal);
     --accent-foreground: var(--off-white);
 
-    /* No red in the system. Destructive reads as a full tonal inversion
-       (transparent -> Off-White fill) plus a Stone Gray border, which is the
-       strongest signal the monochrome ramp allows. See ui/button.tsx. */
-    --destructive: var(--off-white);
+    /* Status accents: readable text, quiet tinted fill, and a matching border.
+       Keep status-to-color decisions in lib/status.ts, not individual pages. */
+    --success: 152 44% 65%;
+    --success-background: 152 22% 12%;
+    --success-border: 152 25% 29%;
+
+    --warning: 39 76% 68%;
+    --warning-background: 39 30% 12%;
+    --warning-border: 39 37% 30%;
+
+    --info: 211 65% 73%;
+    --info-background: 211 28% 14%;
+    --info-border: 211 32% 32%;
+
+    --destructive: 4 65% 73%;
+    --destructive-background: 4 27% 13%;
+    --destructive-border: 4 32% 32%;
     --destructive-foreground: var(--void-black);
 
     --border: var(--graphite);
@@ -82,24 +94,9 @@
   }
 
   /* ---------------------------------------------------------------------
-     Light mode -- self-designed, not part of the brand kit.
-     ------------------------------------------------------------------------
-     The kit specs one ramp (Void Black -> Off-White) and calls the product
-     dark-only; there is no light surface to port. This inverts that same
-     ramp rather than introducing new hues, so it stays inside the "monochrome,
-     Eggshell is the only warm note" rule:
-
-       - Page ground and text swap ends: Off-White ground, Void Black text.
-       - The primary action fill also flips. Eggshell only has contrast as a
-         *light* fill on a *dark* page (see button.tsx); on a light page the
-         same fill would nearly vanish, so light mode's primary button is
-         Void Black -> Charcoal on hover instead -- the dark end of the ramp
-         doing the job Eggshell does in dark mode.
-       - `--muted-foreground` and `--border` get new, darker steps
-         (`--slate` / `--mist`) rather than reusing Warm Gray / Graphite at
-         their dark-mode lightness, which would be too faint on a light
-         ground. These two are the only genuinely new tokens; everything else
-         reuses the existing eight.
+     Light mode uses the same neutral ramp with darker text and lighter
+     surfaces. Status hues keep their meaning, with darker accent text on
+     pale tinted fills for readable small labels.
      ------------------------------------------------------------------- */
   :root.light {
     --slate: 240 5% 33%; /* muted text on a light ground -- Warm Gray's counterpart */
@@ -129,7 +126,21 @@
     --accent: var(--eggshell);
     --accent-foreground: var(--void-black);
 
-    --destructive: var(--void-black);
+    --success: 152 54% 27%;
+    --success-background: 152 32% 94%;
+    --success-border: 152 27% 73%;
+
+    --warning: 35 82% 29%;
+    --warning-background: 39 70% 94%;
+    --warning-border: 39 48% 70%;
+
+    --info: 211 63% 36%;
+    --info-background: 211 58% 95%;
+    --info-border: 211 42% 76%;
+
+    --destructive: 4 57% 40%;
+    --destructive-background: 4 58% 96%;
+    --destructive-border: 4 43% 77%;
     --destructive-foreground: var(--off-white);
 
     --border: var(--mist);

@@ -12,7 +12,7 @@ import {
   LabeledControl
 } from "@/components/admin-common";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -148,9 +148,7 @@ export default function AdminAuditLogsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={log.result === "success" ? "success" : "destructive"}>
-                        {log.result}
-                      </Badge>
+                      <StatusBadge status={log.result} />
                     </TableCell>
                     <TableCell className="max-w-40 truncate">{log.request_id ?? "None"}</TableCell>
                     <TableCell>{formatDateTime(log.created_at)}</TableCell>

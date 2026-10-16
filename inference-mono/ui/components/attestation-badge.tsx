@@ -14,6 +14,7 @@ import { formatDateTime } from "@/lib/format";
 import { useAttestation } from "@/lib/attestation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { getStatusVariant, statusStyles } from "@/lib/status";
 
 // A stored "verified" result older than this is shown as stale rather than
 // green -- e.g. the tab has been open a long time and the interval was
@@ -22,44 +23,29 @@ const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 
 type DisplayStatus = "checking" | "verified" | "unverified" | "stale";
 
-// The Talaris system has no green/amber/red to signal these four states, so
-// they are distinguished by tone and border weight instead, per the kit:
-// a verified check is the only one at full Off-White over a Stone Gray border;
-// the two problem states keep the Off-White glyph but sit on the Graphite
-// border; "checking" recedes entirely to Warm Gray. See ui/badge.tsx for the
-// same weight ladder applied to tags.
+// Copy and icon shape supplement the shared semantic status accents.
 const DISPLAY: Record<
   DisplayStatus,
   {
     label: string;
     icon: typeof ShieldCheck;
-    className: string;
-    borderClassName: string;
   }
 > = {
   checking: {
     label: "Checking attestation",
-    icon: ShieldQuestion,
-    className: "text-muted-foreground",
-    borderClassName: "border-border"
+    icon: ShieldQuestion
   },
   verified: {
     label: "Provably attested",
-    icon: ShieldCheck,
-    className: "text-foreground",
-    borderClassName: "border-border-strong"
+    icon: ShieldCheck
   },
   unverified: {
     label: "Attestation unverified",
-    icon: ShieldAlert,
-    className: "text-foreground",
-    borderClassName: "border-border"
+    icon: ShieldAlert
   },
   stale: {
     label: "Attestation check stale",
-    icon: ShieldAlert,
-    className: "text-foreground",
-    borderClassName: "border-border"
+    icon: ShieldAlert
   }
 };
 
@@ -113,7 +99,8 @@ export function AttestationBadge() {
       ? "stale"
       : status;
 
-  const { label, icon: Icon, className, borderClassName } = DISPLAY[effective];
+  const { label, icon: Icon } = DISPLAY[effective];
+  const styles = statusStyles[getStatusVariant(effective)];
 
   // `allowlistVersion` is not an opaque counter -- inference_api's
   // ModelAllowlistService derives it as the unix timestamp of the newest
@@ -143,15 +130,12 @@ export function AttestationBadge() {
           type="button"
           className={cn(
             "flex w-full items-center gap-2 rounded-sm border px-3 py-2 text-left transition-colors duration-fast ease-standard hover:bg-elevated focus-ring",
-            borderClassName
+            styles.badge
           )}
         >
-          <Icon className={cn("h-3.5 w-3.5 shrink-0", className)} strokeWidth={1.5} />
+          <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
           <span
-            className={cn(
-              "min-w-0 truncate text-[11px] font-medium uppercase tracking-label",
-              className
-            )}
+            className="min-w-0 truncate text-[11px] font-medium uppercase tracking-label"
           >
             {label}
           </span>
@@ -169,7 +153,7 @@ export function AttestationBadge() {
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Icon className={cn("h-4 w-4", className)} strokeWidth={1.5} />
+            <Icon className={cn("h-4 w-4", styles.text)} strokeWidth={1.5} />
             {label}
           </DialogTitle>
           <DialogDescription>{summary}</DialogDescription>

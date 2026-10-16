@@ -13,9 +13,7 @@ import { cn } from "@/lib/utils";
  *   secondary  transparent -> Charcoal fill, Graphite -> Eggshell border
  *   ghost      transparent -> Charcoal fill
  *   link       Off-White -> Eggshell text
- * `destructive` has no red available to it, so it inverts completely on hover
- * (transparent + Stone Gray border -> solid Off-White on Void Black), which is
- * the loudest the monochrome ramp gets.
+ * Destructive actions use the same muted red accent as failure states.
  */
 const buttonVariants = cva(
   "inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium transition-colors duration-base ease-standard focus-ring disabled:pointer-events-none disabled:opacity-40 [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0",
@@ -24,7 +22,7 @@ const buttonVariants = cva(
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary-hover",
         destructive:
-          "border border-border-strong bg-transparent text-foreground hover:border-foreground hover:bg-foreground hover:text-background",
+          "border border-destructive-border bg-transparent text-destructive hover:bg-destructive-background hover:border-destructive",
         outline:
           "border border-input bg-transparent text-foreground hover:border-eggshell hover:bg-elevated",
         secondary:

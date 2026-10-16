@@ -10,6 +10,7 @@ import { AdminPagination } from "@/components/admin-common";
 import { DashboardPageHeader } from "@/components/dashboard-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 import { StatCard } from "@/components/stat-card";
+import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -134,7 +135,7 @@ export default function UsageByModelDetailPage() {
                         {formatMultiplier(event.model_multiplier)}
                       </TableCell>
                       <TableCell>{formatNumber(event.charged_tokens)}</TableCell>
-                      <TableCell>{event.status}</TableCell>
+                      <TableCell><StatusBadge status={event.status} /></TableCell>
                       <TableCell>{formatDateTime(event.created_at)}</TableCell>
                     </TableRow>
                   ))}

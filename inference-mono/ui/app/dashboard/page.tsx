@@ -16,7 +16,7 @@ import { useWallet } from "@/lib/wallet";
 import { DashboardPageHeader } from "@/components/dashboard-shell";
 import { ErrorState, LoadingState } from "@/components/data-state";
 import { StatCard } from "@/components/stat-card";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge, SubscriptionStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -187,9 +187,10 @@ export default function DashboardPage() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-sm text-muted-foreground">Status</span>
-                  <Badge variant={subscriptionQuery.data.status === "active" ? "success" : "outline"}>
-                    {subscriptionQuery.data.status}
-                  </Badge>
+                  <SubscriptionStatusBadge
+                    status={subscriptionQuery.data.status}
+                    cancelAtPeriodEnd={subscriptionQuery.data.cancel_at_period_end}
+                  />
                 </div>
                 <div className="flex items-center justify-between gap-3 text-sm">
                   <span className="text-muted-foreground">Plan</span>
@@ -246,9 +247,7 @@ function WalletStatCard({
       </div>
       <div className="flex flex-1 flex-col justify-between gap-3 px-5 pb-5 pt-4">
         <div>
-          <Badge variant={wallet ? "success" : isConnected ? "outline" : "warning"}>
-            {wallet ? "verified" : isConnected ? "connected" : "not connected"}
-          </Badge>
+          <StatusBadge status={wallet ? "verified" : isConnected ? "connected" : "not_connected"} />
           <p className="numeral mt-2 truncate text-lg font-medium leading-6">
             {wallet
               ? shortenAddress(wallet.address)

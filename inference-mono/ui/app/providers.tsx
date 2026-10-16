@@ -49,10 +49,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 function ThemedToaster() {
   const { theme } = useTheme();
   return (
-    // `richColors` is deliberately off: it paints toasts green/red/amber, and
-    // the Talaris system has no status hues. Toasts are Charcoal panels with a
-    // Graphite hairline (or their light-mode counterparts), same as every
-    // other elevated surface.
+    // Keep neutral toast panels and tint their icons with the shared accents.
     <Toaster
       closeButton
       position="top-right"
@@ -63,6 +60,10 @@ function ThemedToaster() {
             "!rounded-lg !border !border-border !bg-elevated !text-foreground !font-sans !shadow-none",
           title: "!text-sm !font-medium",
           description: "!text-sm !text-muted-foreground",
+          success: "[&_[data-icon]]:!text-success",
+          warning: "[&_[data-icon]]:!text-warning",
+          error: "[&_[data-icon]]:!text-destructive",
+          info: "[&_[data-icon]]:!text-info",
           actionButton: "!rounded-sm !bg-primary !text-primary-foreground",
           cancelButton: "!rounded-sm !bg-transparent !text-muted-foreground",
           closeButton: "!rounded-sm !border-border !bg-elevated !text-muted-foreground"
