@@ -162,12 +162,11 @@ export default function DashboardPage() {
                   ))}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Credits are what every request draws from. Each model has its own rate,
-                  so the raw tokens a request uses aren&apos;t always a 1:1 credit cost. See{" "}
+                  See{" "}
                   <Link href="/dashboard/usage" className="underline">
                     Usage
                   </Link>{" "}
-                  for the per-model breakdown.
+                  for more information.
                 </p>
               </div>
             ) : (
