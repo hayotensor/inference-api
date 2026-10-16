@@ -156,7 +156,14 @@ export function AttestationBadge() {
             </span>
             {label}
           </DialogTitle>
-          <DialogDescription>{summary}</DialogDescription>
+          <DialogDescription asChild>
+            <div className="space-y-3">
+              <p>
+                Remote attestation checks that AI runs in a protected environment designed to keep your prompts and responses private.
+              </p>
+              <p>{summary}</p>
+            </div>
+          </DialogDescription>
         </DialogHeader>
         <div className="min-w-0 space-y-5 text-sm leading-relaxed text-muted-foreground">
           <section className="space-y-3">
