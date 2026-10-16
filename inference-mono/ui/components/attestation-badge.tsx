@@ -1,6 +1,6 @@
 "use client";
 
-import { ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
+import { ArrowRight, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import Link from "next/link";
 
 import {
@@ -14,7 +14,6 @@ import {
 import { formatDateTime } from "@/lib/format";
 import { useAttestation } from "@/lib/attestation";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { getStatusVariant, statusStyles } from "@/lib/status";
 
 // A stored "verified" result older than this is shown as stale rather than
@@ -89,7 +88,7 @@ function reasonSentence(reason: string | undefined): string {
  * hover tooltip, which is easy to miss and unusable on touch devices.
  */
 export function AttestationBadge() {
-  const { data: result, refetch, isFetching } = useAttestation();
+  const { data: result } = useAttestation();
   const checkedAt = result ? new Date(result.checkedAt) : null;
   const status: DisplayStatus = !result ? "checking" : result.status === "verified" ? "verified" : "unverified";
 
@@ -134,10 +133,8 @@ export function AttestationBadge() {
             styles.badge
           )}
         >
-          <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
-          <span
-            className="min-w-0 truncate text-[11px] font-medium uppercase tracking-label"
-          >
+          <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} aria-hidden="true" />
+          <span className="min-w-0 truncate text-[11px] font-medium uppercase tracking-label">
             {label}
           </span>
           {provenAt ? (
@@ -151,75 +148,131 @@ export function AttestationBadge() {
           ) : null}
         </button>
       </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Icon className={cn("h-4 w-4", styles.text)} strokeWidth={1.5} />
+      <DialogContent className="max-w-xl gap-6">
+        <DialogHeader className="space-y-3 pr-5">
+          <DialogTitle className="flex items-center gap-3">
+            <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border", styles.badge)}>
+              <Icon className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
+            </span>
             {label}
           </DialogTitle>
           <DialogDescription>{summary}</DialogDescription>
         </DialogHeader>
-        <div className="space-y-2 text-sm text-muted-foreground">
-          <p>
-            This runs independently on this app&apos;s own server: it does not simply
-            trust a flag the inference API hands back, and it does not trust the
-            inference API&apos;s claimed signing key either. It checks that claimed key
-            against <code className="font-mono text-xs text-foreground">PLATFORM_PUBKEY</code>, this
-            deployment&apos;s own pinned copy of the same key subnet validators and TEEs
-            pin, fetches the signed model allowlist from{" "}
-            <code className="font-mono text-xs text-foreground">GET /allowlist</code>, then recomputes and
-            checks the Ed25519 signature itself.
-          </p>
-          {provenAt ? (
-            <p>
-              <span className="font-medium text-foreground">Proven at: </span>
-              {formatDateTime(provenAt.toISOString())}. This is when this allowlist was last
-              (re)signed with its current content, not when this page happened to check it.
-            </p>
-          ) : null}
-          {checkedAt ? <p>Last checked: {formatDateTime(checkedAt.toISOString())}</p> : null}
-          {result?.platformPubkey ? (
-            <p className="break-all">
-              Pinned platform key:{" "}
-              <code className="font-mono text-xs text-foreground">{result.platformPubkey}</code>
-            </p>
+        <div className="min-w-0 space-y-5 text-sm leading-relaxed text-muted-foreground">
+          <section className="space-y-3">
+            <h3 className="text-[11px] font-medium uppercase tracking-label text-foreground">
+              How verification works
+            </h3>
+            <p>This app&apos;s server independently verifies the platform in three steps:</p>
+            <ol className="list-decimal space-y-2 pl-5 marker:font-medium marker:text-foreground">
+              <li className="pl-1">
+                <span className="font-medium text-foreground">Check the signing key.</span>{" "}
+                Compare the API&apos;s claimed key against the pinned{" "}
+                <code className="rounded-sm bg-background px-1 py-0.5 font-mono text-xs text-foreground">PLATFORM_PUBKEY</code>,
+                the same key pinned by subnet validators and TEEs.
+              </li>
+              <li className="pl-1">
+                <span className="font-medium text-foreground">Fetch the model allowlist.</span>{" "}
+                Retrieve the signed list from{" "}
+                <code className="rounded-sm bg-background px-1 py-0.5 font-mono text-xs text-foreground">GET /allowlist</code>.
+              </li>
+              <li className="pl-1">
+                <span className="font-medium text-foreground">Verify the signature.</span>{" "}
+                Independently recompute and check the Ed25519 signature.
+              </li>
+            </ol>
+          </section>
+          {checkedAt || result?.platformPubkey ? (
+            <dl className="grid min-w-0 gap-4 rounded-lg border border-border bg-background/50 p-4 sm:grid-cols-2">
+              {provenAt ? (
+                <div className="space-y-1">
+                  <dt className="text-xs font-medium text-foreground">Proven at</dt>
+                  <dd className="space-y-1">
+                    <time dateTime={provenAt.toISOString()} className="block text-xs tabular-nums">
+                      {formatDateTime(provenAt.toISOString())}
+                    </time>
+                    <p className="text-xs leading-relaxed">When the current allowlist content was last signed.</p>
+                  </dd>
+                </div>
+              ) : null}
+              {checkedAt ? (
+                <div className="space-y-1">
+                  <dt className="text-xs font-medium text-foreground">Last checked</dt>
+                  <dd>
+                    <time dateTime={checkedAt.toISOString()} className="text-xs tabular-nums">
+                      {formatDateTime(checkedAt.toISOString())}
+                    </time>
+                  </dd>
+                </div>
+              ) : null}
+              {result?.platformPubkey ? (
+                <div className="min-w-0 space-y-1.5 sm:col-span-2">
+                  <dt className="text-xs font-medium text-foreground">Pinned platform key</dt>
+                  <dd>
+                    <code className="block break-all font-mono text-xs leading-relaxed">{result.platformPubkey}</code>
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
           ) : null}
           {result?.entries && result.entries.length > 0 ? (
-            <div>
-              <p className="font-medium text-foreground">Attested models:</p>
-              <ul className="mt-1 space-y-1">
+            <section className="min-w-0 space-y-3">
+              <h3 className="text-[11px] font-medium uppercase tracking-label text-foreground">Attested models</h3>
+              <ul className="space-y-3">
                 {result.entries.map((entry, i) => (
-                  <li key={`${entry.model_id}-${entry.model_version ?? ""}-${i}`} className="break-all">
-                    <code className="font-mono text-xs text-foreground">
+                  <li key={`${entry.model_id}-${entry.model_version ?? ""}-${i}`} className="min-w-0 space-y-3 rounded-lg border border-border p-3">
+                    <code className="block break-all font-mono text-xs font-medium text-foreground">
                       {entry.model_id}
                       {entry.model_version ? `@${entry.model_version}` : ""}
-                    </code>: hash <code className="font-mono text-xs text-foreground">{entry.model_hash}</code>
-                    {entry.gpu_hash ? (
-                      <>
-                        {" "}
-                        · gpu <code className="font-mono text-xs text-foreground">{entry.gpu_hash}</code>
-                      </>
-                    ) : null}
+                    </code>
+                    <dl className="space-y-2 text-xs">
+                      <div className="grid gap-1 sm:grid-cols-[5rem_minmax(0,1fr)] sm:gap-3">
+                        <dt className="font-medium">Model hash</dt>
+                        <dd><code className="break-all font-mono leading-relaxed">{entry.model_hash}</code></dd>
+                      </div>
+                      {entry.gpu_hash ? (
+                        <div className="grid gap-1 sm:grid-cols-[5rem_minmax(0,1fr)] sm:gap-3">
+                          <dt className="font-medium">GPU hash</dt>
+                          <dd><code className="break-all font-mono leading-relaxed">{entry.gpu_hash}</code></dd>
+                        </div>
+                      ) : null}
+                    </dl>
                   </li>
                 ))}
               </ul>
-            </div>
+            </section>
           ) : null}
-          <p>Automatically re-checks every 6 hours while this page is open.</p>
-          <p>
-            For an overview of how privacy and remote attestation work on
-            the platform, visit our{" "}
-            <Link href="/security" className="focus-ring text-foreground underline underline-offset-4">
-              security overview
-            </Link>.
-          </p>
-          <p>
-            To perform remote attestation yourself, see the{" "}
-            <a href="#" className="focus-ring text-foreground underline underline-offset-4">
-              API documentation
-            </a>.
-          </p>
+          <p className="text-xs">Automatically re-checks every 6 hours while this page is open.</p>
         </div>
+        <section className="space-y-3 border-t border-border pt-5">
+          <h3 className="text-[11px] font-medium uppercase tracking-label text-foreground">Learn more</h3>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Link
+              href="/security"
+              className="focus-ring rounded-lg border border-border bg-background/50 p-3 transition-colors duration-fast ease-standard hover:bg-card"
+            >
+              <span className="flex items-center justify-between gap-2 text-sm font-medium text-foreground">
+                <span className="underline underline-offset-4">Security overview</span>
+                <ArrowRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              </span>
+              <span className="mt-2 block text-xs leading-relaxed text-muted-foreground">
+                How privacy and remote attestation work on the platform.
+              </span>
+            </Link>
+            <a
+              href="#"
+              className="focus-ring rounded-lg border border-border bg-background/50 p-3 transition-colors duration-fast ease-standard hover:bg-card"
+            >
+              <span className="flex items-center justify-between gap-2 text-sm font-medium text-foreground">
+                <span className="underline underline-offset-4">API documentation</span>
+                <ArrowRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              </span>
+              <span className="mt-2 block text-xs leading-relaxed text-muted-foreground">
+                How to perform remote attestation yourself.
+              </span>
+            </a>
+          </div>
+        </section>
       </DialogContent>
     </Dialog>
   );
