@@ -1,6 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="#F7F6F4" stroke-width="1.5" stroke-linejoin="miter">
-  
-  <path d="M22 8 L42 14 L42 56 L22 56 Z" fill="#F7F6F4" stroke="none"></path>
-  <path d="M32 11 L32 56" stroke="#0A0A0B" stroke-width="1.25"></path>
-  <path d="M22 22 L42 22" stroke="#0A0A0B" stroke-width="1"></path>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -71.492405 378.16711 378.16711" fill="currentColor">
+  <!-- Geometry from talaris-4-24.svg, centered in a square browser icon. -->
+  <style>
+    :root { color: #0A0A0B; }
+    @media (prefers-color-scheme: dark) {
+      :root { color: #F7F6F4; }
+    }
+  </style>
+  <g transform="translate(68.72167,-5.0662617)">
+    <path d="M 105.91263 142.89196 L 123.37668 113.86065 L 175.19161 92.544126 L 195.74177 59.094488 L -68.72167 184.75865 L 105.91263 142.89196 z" />
+    <path d="M 265.68427 71.369191 L 128.70711 121.28191 L 117.82198 140.03683 L 51.251369 240.24881 L 184.49698 194.37564 L 265.68427 71.369191 z" />
+    <path d="M 309.44543 5.0662617 L 209.99982 52.319708 L 187.8451 88.2617 L 274.67701 57.743666 L 309.44543 5.0662617 z" />
+  </g>
 </svg>

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="378.16711mm"
+   height="235.1823mm"
+   viewBox="0 0 378.16711 235.1823"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.3.2 (091e20e, 2023-11-25, custom)"
+   sodipodi:docname="talaris-4-24.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     inkscape:zoom="0.25828373"
+     inkscape:cx="456.86192"
+     inkscape:cy="402.65796"
+     inkscape:window-width="1954"
+     inkscape:window-height="1250"
+     inkscape:window-x="2837"
+     inkscape:window-y="57"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs1" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(68.72167,-5.0662617)">
+    <path
+       id="path7"
+       style="fill:#000000;fill-opacity:1"
+       d="M 105.91263 142.89196 L 123.37668 113.86065 L 175.19161 92.544126 L 195.74177 59.094488 L -68.72167 184.75865 L 105.91263 142.89196 z " />
+    <path
+       id="path2"
+       style="fill:#000000;fill-opacity:1"
+       d="M 265.68427 71.369191 L 128.70711 121.28191 L 117.82198 140.03683 L 51.251369 240.24881 L 184.49698 194.37564 L 265.68427 71.369191 z " />
+    <path
+       id="path1"
+       style="fill:#000000;fill-opacity:1"
+       d="M 309.44543 5.0662617 L 209.99982 52.319708 L 187.8451 88.2617 L 274.67701 57.743666 L 309.44543 5.0662617 z " />
+  </g>
+</svg>

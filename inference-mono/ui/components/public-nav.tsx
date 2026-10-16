@@ -133,7 +133,7 @@ export function PublicNav() {
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-[8px]">
       <div className="page-shell flex min-h-16 flex-wrap items-center justify-between gap-x-4">
-        <AppLogo className="shrink-0 [&>span]:hidden sm:[&>span]:inline" />
+        <AppLogo className="shrink-0 [&>[data-wordmark]]:hidden sm:[&>[data-wordmark]]:inline" />
         <NavigationMenu.Root
           aria-label="Main navigation"
           delayDuration={150}
