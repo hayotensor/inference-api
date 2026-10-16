@@ -1,6 +1,7 @@
 "use client";
 
 import { ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
+import Link from "next/link";
 
 import {
   Dialog,
@@ -205,6 +206,13 @@ export function AttestationBadge() {
             </div>
           ) : null}
           <p>Automatically re-checks every 6 hours while this page is open.</p>
+          <p>
+            For an overview of how privacy and remote attestation work on
+            the platform, visit our{" "}
+            <Link href="/security" className="focus-ring text-foreground underline underline-offset-4">
+              security overview
+            </Link>.
+          </p>
           <p>
             To perform remote attestation yourself, see the{" "}
             <a href="#" className="focus-ring text-foreground underline underline-offset-4">
