@@ -1,6 +1,6 @@
 """HYP-66: pay-as-you-go wallet top-ups.
 
-A user can buy a fixed token bundle through a one-time (mode="payment") Stripe
+A user can buy a fixed bundle or custom amount through a one-time (mode="payment") Stripe
 Checkout Session; completing it credits `UserWallet.balance_tokens`. Once the
 subscription allowance for the current usage period is exhausted,
 `UsageService.reserve_inference_tokens`/`settle_inference_usage` draw the rest
@@ -19,12 +19,14 @@ import hmac
 import json
 import time
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from pydantic import SecretStr
 from sqlalchemy import select
 
 from app.billing.plans import WALLET_TOPUP_BUNDLES
+from app.billing.stripe import StripeClient
 from app.core.config import settings
 from app.core.security import utcnow
 from app.db.models.manual_token_adjustment import ManualTokenAdjustment
@@ -190,7 +192,89 @@ async def test_wallet_checkout_session_rejects_an_unknown_bundle(client, fake_st
     assert response.json()["detail"]["code"] == "unknown_wallet_bundle"
 
 
-async def test_webhook_credits_the_wallet_exactly_once(client, verified_signup, monkeypatch):
+@pytest.mark.parametrize(
+    ("usd_cents", "tokens"),
+    [
+        (1_000, 1_000_000),
+        (1_234, 1_234_000),
+        (2_500, 2_600_000),
+        (3_750, 3_900_000),
+        (5_000, 5_400_000),
+        (7_500, 8_100_000),
+        (10_000, 11_200_000),
+        (12_500, 14_000_000),
+        (99_999_999, 111_999_998_880),
+    ],
+)
+async def test_custom_wallet_checkout_uses_existing_tier_rates(
+    client, fake_stripe, verified_signup, usd_cents, tokens
+):
+    _, token = await _login(client)
+    response = await client.post(
+        "/billing/wallet/checkout-session",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"usd_cents": usd_cents},
+    )
+    assert response.status_code == 200, response.text
+    call = dict(fake_stripe.calls)["create_wallet_checkout_session"]
+    assert call["bundle_id"] == "custom"
+    assert call["usd_cents"] == usd_cents
+    assert call["tokens"] == tokens
+
+
+async def test_custom_wallet_checkout_rejects_invalid_amounts_and_ambiguous_requests(
+    client, fake_stripe, verified_signup
+):
+    _, token = await _login(client)
+    for payload in [
+        {},
+        {"usd_cents": None},
+        {"usd_cents": -1},
+        {"usd_cents": 0},
+        {"usd_cents": 999},
+        {"usd_cents": 100_000_000},
+        {"usd_cents": 1_000.5},
+        {"usd_cents": "1000"},
+        {"usd_cents": True},
+        {"bundle_id": "topup_10", "usd_cents": 1_000},
+    ]:
+        response = await client.post(
+            "/billing/wallet/checkout-session",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+        assert response.status_code == 422, response.text
+    assert fake_stripe.calls == []
+
+
+def test_wallet_checkout_records_the_amount_and_credits_in_stripe_metadata(monkeypatch):
+    calls = []
+
+    def create_session(**params):
+        calls.append(params)
+        return {"id": "cs_custom", "url": "https://checkout.stripe.com/c/pay/cs_custom"}
+
+    stripe = SimpleNamespace(checkout=SimpleNamespace(Session=SimpleNamespace(create=create_session)))
+    monkeypatch.setattr(StripeClient, "_stripe", lambda self: stripe)
+    StripeClient().create_wallet_checkout_session(
+        customer_id="cus_custom", user_id="user_custom", bundle_id="custom",
+        usd_cents=3_750, tokens=3_900_000,
+    )
+    checkout = calls[0]
+    assert checkout["mode"] == "payment"
+    assert checkout["line_items"][0]["price_data"]["unit_amount"] == 3_750
+    assert checkout["metadata"]["usd_cents"] == "3750"
+    assert checkout["metadata"]["tokens"] == "3900000"
+    assert checkout["payment_intent_data"]["metadata"] == checkout["metadata"]
+
+
+@pytest.mark.parametrize(
+    ("bundle_id", "usd_cents", "tokens"),
+    [("topup_10", 1_000, 1_000_000), ("custom", 3_750, 3_900_000)],
+)
+async def test_webhook_credits_the_wallet_exactly_once(
+    client, verified_signup, monkeypatch, bundle_id, usd_cents, tokens
+):
     """The whole webhook path for a wallet top-up: signature check, purpose
     routing away from the subscription sync path, crediting the balance, and
     StripeWebhookEvent's dedupe so a retried delivery never double-credits."""
@@ -198,7 +282,6 @@ async def test_webhook_credits_the_wallet_exactly_once(client, verified_signup, 
     monkeypatch.setattr(settings, "stripe_webhook_secret", SecretStr("whsec_test_wallet_secret"))
 
     user_id, token = await _login(client)
-    bundle = next(b for b in WALLET_TOPUP_BUNDLES if b.id == "topup_10")
 
     event = {
         "id": "evt_test_wallet_topup_1",
@@ -214,8 +297,9 @@ async def test_webhook_credits_the_wallet_exactly_once(client, verified_signup, 
                 "metadata": {
                     "purpose": "wallet_topup",
                     "user_id": user_id,
-                    "bundle_id": bundle.id,
-                    "tokens": str(bundle.tokens),
+                    "bundle_id": bundle_id,
+                    "usd_cents": str(usd_cents),
+                    "tokens": str(tokens),
                 },
             }
         },
@@ -229,7 +313,7 @@ async def test_webhook_credits_the_wallet_exactly_once(client, verified_signup, 
     assert first.json() == {"received": True, "processed": True}
 
     balance = await client.get("/billing/wallet", headers={"Authorization": f"Bearer {token}"})
-    assert balance.json()["balance_tokens"] == bundle.tokens
+    assert balance.json()["balance_tokens"] == tokens
 
     # Stripe redelivering the same event must not double-credit.
     replay = await client.post(
@@ -240,7 +324,7 @@ async def test_webhook_credits_the_wallet_exactly_once(client, verified_signup, 
     balance_after_replay = await client.get(
         "/billing/wallet", headers={"Authorization": f"Bearer {token}"}
     )
-    assert balance_after_replay.json()["balance_tokens"] == bundle.tokens
+    assert balance_after_replay.json()["balance_tokens"] == tokens
 
     async with async_session_maker() as session:
         transactions = (
@@ -250,7 +334,7 @@ async def test_webhook_credits_the_wallet_exactly_once(client, verified_signup, 
         ).scalars().all()
         assert len(transactions) == 1
         assert transactions[0].kind == "purchase"
-        assert transactions[0].delta_tokens == bundle.tokens
+        assert transactions[0].delta_tokens == tokens
         assert transactions[0].stripe_payment_intent_id == "pi_test_wallet_1"
 
 

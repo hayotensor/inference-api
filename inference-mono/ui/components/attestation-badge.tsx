@@ -128,6 +128,7 @@ export function AttestationBadge() {
       <DialogTrigger asChild>
         <button
           type="button"
+          title={label}
           className={cn(
             "flex w-full items-center gap-2 rounded-sm border px-3 py-2 text-left transition-colors duration-fast ease-standard hover:bg-elevated focus-ring",
             styles.badge

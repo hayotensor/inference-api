@@ -99,6 +99,27 @@ test("backend errors are not replaced by demo results", async () => {
   expect(() => demoRequest("/me")).toThrow("Local UI demo mode is disabled");
 });
 
+test("wallet checkout sends the selected bundle or custom amount to the backend", async () => {
+  store.authStore.write(store.tokenResponseToSession(tokenResponse));
+  await api.billingApi.walletCheckout({ bundle_id: "topup_25" });
+  await api.billingApi.walletCheckout({ usd_cents: 3750 });
+  expect(requests.map((request) => ({
+    url: request.url,
+    method: request.init?.method,
+    body: JSON.parse(String(request.init?.body)),
+    authorization: new Headers(request.init?.headers).get("Authorization")
+  }))).toEqual([
+    {
+      url: "http://api.example.invalid/billing/wallet/checkout-session",
+      method: "POST", body: { bundle_id: "topup_25" }, authorization: "Bearer backend-token"
+    },
+    {
+      url: "http://api.example.invalid/billing/wallet/checkout-session",
+      method: "POST", body: { usd_cents: 3750 }, authorization: "Bearer backend-token"
+    }
+  ]);
+});
+
 test("normal SSO calls and server cookie behavior are preserved", async () => {
   expect(api.authApi.oauthLoginUrl("google")).toBe("http://api.example.invalid/auth/google/login");
   const destinations: string[] = [];

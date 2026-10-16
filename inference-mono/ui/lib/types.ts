@@ -110,6 +110,10 @@ export interface WalletTopupBundle {
   currency: string;
 }
 
+export type WalletCheckoutRequest =
+  | { bundle_id: string; usd_cents?: never }
+  | { usd_cents: number; bundle_id?: never };
+
 export interface WalletBalance {
   balance_tokens: number;
 }

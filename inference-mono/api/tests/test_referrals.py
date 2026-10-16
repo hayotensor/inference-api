@@ -387,8 +387,12 @@ async def test_no_referral_credit_past_the_twelve_month_earnout_window(
         assert earnings == []
 
 
+@pytest.mark.parametrize(
+    ("bundle_id", "usd_cents", "tokens", "bonus_tokens"),
+    [("topup_10", 1_000, 1_000_000, 100_000), ("custom", 3_750, 3_900_000, 390_000)],
+)
 async def test_wallet_topup_by_a_referred_user_credits_the_referrer(
-    client, fake_stripe, verified_signup, monkeypatch
+    client, fake_stripe, verified_signup, monkeypatch, bundle_id, usd_cents, tokens, bonus_tokens
 ):
     monkeypatch.setattr(settings, "stripe_secret_key", SecretStr("sk_test_dummy"))
     monkeypatch.setattr(settings, "stripe_webhook_secret", SecretStr("whsec_test_referral_secret"))
@@ -406,8 +410,9 @@ async def test_wallet_topup_by_a_referred_user_credits_the_referrer(
         "metadata": {
             "purpose": "wallet_topup",
             "user_id": referred_id,
-            "bundle_id": "topup_10",
-            "tokens": "1000000",
+            "bundle_id": bundle_id,
+            "usd_cents": str(usd_cents),
+            "tokens": str(tokens),
         },
     }
     response = await _post_webhook(
@@ -415,12 +420,11 @@ async def test_wallet_topup_by_a_referred_user_credits_the_referrer(
     )
     assert response.json() == {"received": True, "processed": True}
 
-    # topup_10 = $10.00 for 1,000,000 tokens ($0.001/token); 10% of $10 = $1.00 ->
-    # 1,000 * ($0.01 / $0.001-per-token)... i.e. 100 cents / 0.001 cents-per-token.
+    # The referrer receives 10% using the purchased credits' rate.
     balance = await client.get(
         "/billing/wallet", headers={"Authorization": f"Bearer {referrer_token}"}
     )
-    assert balance.json()["balance_tokens"] == 100_000
+    assert balance.json()["balance_tokens"] == bonus_tokens
 
     async with async_session_maker() as session:
         earnings = (
@@ -429,5 +433,5 @@ async def test_wallet_topup_by_a_referred_user_credits_the_referrer(
             )
         ).scalars().all()
         assert len(earnings) == 1
-        assert earnings[0].tokens_credited == 100_000
+        assert earnings[0].tokens_credited == bonus_tokens
         assert earnings[0].source_id == "pi_test_referred4_topup"

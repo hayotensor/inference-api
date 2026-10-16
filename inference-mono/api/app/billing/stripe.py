@@ -87,6 +87,7 @@ class StripeClient:
             "purpose": "wallet_topup",
             "user_id": user_id,
             "bundle_id": bundle_id,
+            "usd_cents": str(usd_cents),
             "tokens": str(tokens),
         }
         return stripe.checkout.Session.create(

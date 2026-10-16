@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 BillingInterval = Literal["month", "year"]
 
@@ -80,7 +80,14 @@ class WalletTopupBundleRead(BaseModel):
 
 
 class WalletCheckoutSessionRequest(BaseModel):
-    bundle_id: str
+    bundle_id: str | None = None
+    usd_cents: int | None = Field(default=None, strict=True, ge=1_000, le=99_999_999)
+
+    @model_validator(mode="after")
+    def require_one_topup_option(self) -> WalletCheckoutSessionRequest:
+        if (self.bundle_id is None) == (self.usd_cents is None):
+            raise ValueError("Choose either a top-up bundle or a custom amount")
+        return self
 
 
 class WalletBalanceRead(BaseModel):

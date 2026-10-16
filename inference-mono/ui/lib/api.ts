@@ -40,6 +40,7 @@ import type {
   UsagePeriod,
   User,
   WalletBalance,
+  WalletCheckoutRequest,
   WalletTopupBundle
 } from "@/lib/types";
 
@@ -551,11 +552,11 @@ export const billingApi = {
   walletBalance(options: ApiCallOptions = {}) {
     return apiRequest<WalletBalance>("/billing/wallet", { auth: true, signal: options.signal });
   },
-  walletCheckout(bundleId: string) {
+  walletCheckout(request: WalletCheckoutRequest) {
     return apiRequest<StripeSessionResponse>("/billing/wallet/checkout-session", {
       method: "POST",
       auth: true,
-      body: { bundle_id: bundleId }
+      body: request
     });
   }
 };

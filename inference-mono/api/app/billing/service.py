@@ -9,7 +9,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.billing.plans import looks_like_test_plan, seed_default_billing_plans, wallet_topup_bundle
+from app.billing.plans import (
+    custom_wallet_topup,
+    looks_like_test_plan,
+    seed_default_billing_plans,
+    wallet_topup_bundle,
+)
 from app.billing.stripe import StripeClient
 from app.core.errors import bad_request, forbidden, not_found
 from app.core.security import utcnow
@@ -173,13 +178,19 @@ class BillingService:
         await self.session.flush()
         return {"id": session["id"], "url": session["url"]}
 
-    async def create_wallet_checkout_session(self, user: User, bundle_id: str) -> dict[str, Any]:
+    async def create_wallet_checkout_session(
+        self, user: User, bundle_id: str | None = None, *, usd_cents: int | None = None
+    ) -> dict[str, Any]:
         """HYP-66: a one-time (mode="payment") Checkout Session for a pay-as-you-go
         wallet top-up. Unlike subscription checkout, this deliberately does not
         call _reject_if_checkout_pending -- buying more than one bundle, or
         topping up again before a previous purchase's webhook has landed, is
         fine; nothing here creates a recurring commitment to dedupe against."""
-        bundle = wallet_topup_bundle(bundle_id)
+        bundle = (
+            custom_wallet_topup(usd_cents)
+            if usd_cents is not None
+            else wallet_topup_bundle(bundle_id or "")
+        )
         if bundle is None:
             raise bad_request("unknown_wallet_bundle", "Unknown wallet top-up bundle")
         account = await self.ensure_billing_account(user)
@@ -244,18 +255,17 @@ class BillingService:
         # (mode="payment") Checkout Sessions never produce a Stripe invoice --
         # so this is the only place a wallet top-up can trigger a referral
         # credit (contrast with _credit_referral_for_invoice, the
-        # subscription-invoice.paid side). Uses the bundle's own already-known
-        # $/token rate, per the HYP-65 spec.
-        bundle_id = metadata.get("bundle_id")
-        bundle = wallet_topup_bundle(str(bundle_id)) if bundle_id else None
-        if bundle is not None and payment_intent_id:
+        # subscription-invoice.paid side). Use the price and credits recorded at
+        # checkout so custom amounts receive the same referral treatment.
+        usd_cents = int(metadata.get("usd_cents", "0"))
+        if usd_cents > 0 and payment_intent_id:
             from app.referrals.service import ReferralService
 
             await ReferralService(self.session).credit_for_payment(
                 referred_user_id=user_id,
-                amount_cents=bundle.usd_cents,
+                amount_cents=usd_cents,
                 source_id=payment_intent_id,
-                rate_cents_per_token=Decimal(bundle.usd_cents) / Decimal(bundle.tokens),
+                rate_cents_per_token=Decimal(usd_cents) / Decimal(tokens),
             )
 
     async def _lock_or_create_wallet(self, user_id: uuid.UUID) -> UserWallet:

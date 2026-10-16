@@ -11,6 +11,8 @@ import { ErrorState, LoadingState } from "@/components/data-state";
 import { StatusBadge, SubscriptionStatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
@@ -39,11 +41,14 @@ import {
   planIsPurchasable,
   planPriceCents
 } from "@/lib/stripe";
-import type { BillingInterval } from "@/lib/types";
+import type { BillingInterval, WalletCheckoutRequest } from "@/lib/types";
 
 export default function BillingPage() {
   const queryClient = useQueryClient();
   const [interval, setInterval] = React.useState<BillingInterval>("month");
+  const [selectedBundleId, setSelectedBundleId] = React.useState<string | null>(null);
+  const [showCustomAmount, setShowCustomAmount] = React.useState(false);
+  const [customAmount, setCustomAmount] = React.useState("");
   const subscriptionQuery = useQuery({
     queryKey: ["billing-subscription"],
     queryFn: billingApi.subscription
@@ -103,7 +108,7 @@ export default function BillingPage() {
     onError: (error) => toast.error(apiErrorMessage(error))
   });
   const walletCheckoutMutation = useMutation({
-    mutationFn: (bundleId: string) => billingApi.walletCheckout(bundleId),
+    mutationFn: (request: WalletCheckoutRequest) => billingApi.walletCheckout(request),
     onSuccess: redirectToStripeSession,
     onError: (error) => toast.error(apiErrorMessage(error))
   });
@@ -118,6 +123,24 @@ export default function BillingPage() {
   const hasActiveSubscription = Boolean(
     subscription && ["active", "trialing", "past_due"].includes(subscription.status)
   );
+  const selectedBundle = walletBundlesQuery.data?.find((bundle) => bundle.id === selectedBundleId);
+  const customAmountCents = /^\d+(\.\d{1,2})?$/.test(customAmount)
+    ? Math.round(Number(customAmount) * 100)
+    : 0;
+  const customAmountValid = customAmountCents >= 1_000 && customAmountCents <= 99_999_999;
+  const customAmountTier = (walletBundlesQuery.data ?? [])
+    .filter((bundle) => bundle.usd_cents <= customAmountCents)
+    .sort((a, b) => b.usd_cents - a.usd_cents)[0];
+  const customAmountCredits = customAmountValid && customAmountTier
+    ? Math.floor(customAmountCents * customAmountTier.tokens / customAmountTier.usd_cents)
+    : null;
+  const walletCheckoutRequest: WalletCheckoutRequest | null = showCustomAmount
+    ? customAmountCredits !== null
+      ? { usd_cents: customAmountCents }
+      : null
+    : selectedBundle
+      ? { bundle_id: selectedBundle.id }
+      : null;
 
   return (
     <>
@@ -225,7 +248,7 @@ export default function BillingPage() {
                 <CardTitle>Plans</CardTitle>
                 <CardDescription>
                   {hasActiveSubscription
-                    ? "Switching plans updates the subscription in place; The difference prorates."
+                    ? "Switching plans updates the subscription in place; the difference prorates."
                     : "Choosing a paid plan opens Checkout."}{" "}
                 </CardDescription>
               </div>
@@ -292,9 +315,7 @@ export default function BillingPage() {
                         <TableCell className="text-right">
                           {current ? (
                             <StatusBadge status="current" />
-                          ) : isFree ? (
-                            <span className="text-sm text-muted-foreground">Included</span>
-                          ) : !purchasable ? (
+                          ) : isFree ? null : !purchasable ? (
                             <span className="text-sm text-muted-foreground">—</span>
                           ) : hasActiveSubscription ? (
                             <Button
@@ -353,35 +374,102 @@ export default function BillingPage() {
                     {formatNumber(walletBalanceQuery.data.balance_tokens)}
                   </span>
                 </div>
-                <div className="space-y-4">
+                <form
+                  className="space-y-4"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (!walletCheckoutRequest || walletCheckoutMutation.isPending) return;
+                    walletCheckoutMutation.mutate(walletCheckoutRequest);
+                  }}
+                >
                   <div className="my-4 border-t-2 border-gray-100"></div>
                   <span className="text-muted-foreground font-medium">Top up</span>
                   {walletBundlesQuery.isLoading ? <LoadingState /> : null}
                   {walletBundlesQuery.isError ? <ErrorState error={walletBundlesQuery.error} /> : null}
                   <div className="grid gap-2 sm:grid-cols-2">
                     {(walletBundlesQuery.data ?? []).map((bundle) => {
-                      const isThisBundlePending =
-                        walletCheckoutMutation.isPending &&
-                        walletCheckoutMutation.variables === bundle.id;
+                      const isSelected = selectedBundleId === bundle.id;
                       return (
                         <Button
                           key={bundle.id}
-                          variant="outline"
-                          onClick={() => walletCheckoutMutation.mutate(bundle.id)}
+                          type="button"
+                          variant={isSelected ? "default" : "outline"}
+                          aria-pressed={isSelected}
+                          onClick={() => {
+                            setSelectedBundleId(bundle.id);
+                            setShowCustomAmount(false);
+                          }}
                           disabled={walletCheckoutMutation.isPending}
                         >
-                          {isThisBundlePending ? (
-                            <Loader2 className="animate-spin" />
-                          ) : (
-                            <Wallet />
-                          )}
+                          <Wallet />
                           {formatMoney(bundle.usd_cents, bundle.currency)} for{" "}
                           {formatNumber(bundle.tokens)}
                         </Button>
                       );
                     })}
                   </div>
-                </div>
+                  {!showCustomAmount ? (
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto w-full p-0 text-muted-foreground underline"
+                      aria-expanded={showCustomAmount}
+                      aria-controls="custom-topup-fields"
+                      onClick={() => {
+                        setSelectedBundleId(null);
+                        setShowCustomAmount(true);
+                      }}
+                      disabled={walletCheckoutMutation.isPending}
+                    >
+                      Enter a custom amount
+                    </Button>
+                  ) : null}
+                  {showCustomAmount ? (
+                    <div id="custom-topup-fields" className="space-y-3">
+                      <Label htmlFor="custom-topup-amount">Amount (USD)</Label>
+                      <Input
+                        id="custom-topup-amount"
+                        className="focus-visible:ring-0 focus-visible:ring-offset-0"
+                        type="number"
+                        inputMode="decimal"
+                        min="10"
+                        max="999999.99"
+                        step="0.01"
+                        placeholder="Enter amount"
+                        value={customAmount}
+                        onChange={(event) => setCustomAmount(event.target.value)}
+                        aria-describedby="custom-topup-help"
+                        aria-invalid={customAmount !== "" && !customAmountValid}
+                        disabled={walletCheckoutMutation.isPending}
+                        required
+                        autoFocus
+                      />
+                      <p id="custom-topup-help" className="text-xs text-muted-foreground" aria-live="polite">
+                        {customAmountCredits !== null
+                          ? `${formatMoney(customAmountCents)} for ${formatNumber(customAmountCredits)} credits`
+                          : customAmount && !customAmountValid
+                            ? "Enter an amount from $10 to $999,999.99, with up to two decimal places."
+                            : "Minimum $10. Credits use the same rates as the top-up options above."}
+                      </p>
+                    </div>
+                  ) : null}
+                  {selectedBundle || showCustomAmount ? (
+                    <div>
+                      <Button
+                        type="submit"
+                        className="w-full"
+                        disabled={!walletCheckoutRequest || walletCheckoutMutation.isPending}
+                      >
+                        {walletCheckoutMutation.isPending ? (
+                          <Loader2 className="animate-spin" />
+                        ) : (
+                          <CreditCard />
+                        )}
+                        Confirm top-up
+                      </Button>
+                    </div>
+                  ) : null}
+                </form>
               </div>
             ) : null}
           </CardContent>

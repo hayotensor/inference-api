@@ -75,6 +75,19 @@ def wallet_topup_bundle(bundle_id: str) -> WalletTopupBundle | None:
     return next((bundle for bundle in WALLET_TOPUP_BUNDLES if bundle.id == bundle_id), None)
 
 
+def custom_wallet_topup(usd_cents: int) -> WalletTopupBundle:
+    """Use the largest bundle tier reached by the custom amount."""
+    tier = max(
+        (bundle for bundle in WALLET_TOPUP_BUNDLES if bundle.usd_cents <= usd_cents),
+        key=lambda bundle: bundle.usd_cents,
+    )
+    return WalletTopupBundle(
+        id="custom",
+        usd_cents=usd_cents,
+        tokens=usd_cents * tier.tokens // tier.usd_cents,
+    )
+
+
 @dataclass(frozen=True)
 class PlanSeed:
     slug: str

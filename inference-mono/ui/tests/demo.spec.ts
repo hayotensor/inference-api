@@ -126,7 +126,7 @@ test("billing, wallet, and admin user mutations are local and queries support fi
 test("external and unknown operations fail locally and cancellation is honored", async () => {
   await login();
   await expect(billingApi.portal()).rejects.toMatchObject({ status: 501 });
-  await expect(billingApi.walletCheckout("demo-small")).rejects.toMatchObject({ status: 501 });
+  await expect(billingApi.walletCheckout({ bundle_id: "topup_10" })).rejects.toMatchObject({ status: 501 });
   await expect(apiRequest("/new-unimplemented-route")).rejects.toMatchObject({ status: 501 });
   expect(authApi.oauthLoginUrl("google")).toBe("/login");
   expect(() => redirectToStripeSession({ url: "https://checkout.example.com" })).toThrow("Stripe connections are disabled");

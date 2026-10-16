@@ -104,8 +104,10 @@ const auditLogs: AdminAuditLog[] = ["auth.login", "api_key.create", "admin.owner
 }));
 
 export const walletBundles: WalletTopupBundle[] = [
-  { id: "demo-small", usd_cents: 1000, tokens: 1_000_000, currency: "usd" },
-  { id: "demo-large", usd_cents: 5000, tokens: 5_500_000, currency: "usd" }
+  { id: "topup_10", usd_cents: 1000, tokens: 1_000_000, currency: "usd" },
+  { id: "topup_25", usd_cents: 2500, tokens: 2_600_000, currency: "usd" },
+  { id: "topup_50", usd_cents: 5000, tokens: 5_400_000, currency: "usd" },
+  { id: "topup_100", usd_cents: 10000, tokens: 11_200_000, currency: "usd" }
 ];
 export const referrals: ReferralSummary = {
   referral_code: "LOCALDEMO", referral_link: "/signup?ref=LOCALDEMO",

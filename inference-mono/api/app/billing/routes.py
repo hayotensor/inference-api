@@ -143,14 +143,14 @@ async def create_wallet_checkout_session(
     user: User = Depends(current_active_user),
 ) -> StripeSessionResponse:
     stripe_session = await BillingService(session).create_wallet_checkout_session(
-        user, payload.bundle_id
+        user, payload.bundle_id, usd_cents=payload.usd_cents
     )
     await write_audit_log(
         session,
         "billing.wallet_checkout_session",
         user_id=user.id,
         request=request,
-        metadata={"bundle_id": payload.bundle_id, "session_id": stripe_session["id"]},
+        metadata={**payload.model_dump(exclude_none=True), "session_id": stripe_session["id"]},
     )
     await session.commit()
     return StripeSessionResponse.model_validate(stripe_session)
