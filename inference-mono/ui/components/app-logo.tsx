@@ -30,7 +30,7 @@ export function AppLogo({
     <Link
       href={href}
       className={cn(
-        "focus-ring inline-flex items-center gap-2.5 text-foreground transition-colors duration-fast hover:text-eggshell",
+        "focus-ring inline-flex items-center gap-2.5 text-foreground transition-colors duration-fast hover:text-muted-foreground",
         className
       )}
       aria-label="Talaris"
