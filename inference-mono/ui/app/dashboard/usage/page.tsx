@@ -93,6 +93,7 @@ export default function UsagePage() {
         description="Your allowance is spent in credits, not raw tokens. Every model has its own rate, so the same request can cost more or fewer credits depending on which model handles it."
         action={
           <Button
+            variant="outline"
             onClick={() => recalculateMutation.mutate(false)}
             disabled={recalculateMutation.isPending}
           >
@@ -101,7 +102,7 @@ export default function UsagePage() {
             ) : (
               <RefreshCw />
             )}
-            Recalculate
+            Refresh
           </Button>
         }
       />
