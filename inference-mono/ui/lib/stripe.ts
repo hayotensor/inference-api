@@ -25,9 +25,18 @@ export function planIsPurchasable(plan: BillingPlan, interval: BillingInterval) 
   return Boolean(planPriceId(plan, interval));
 }
 
-/** Free plans have no Stripe price on any interval. */
+/**
+ * Free plans have no Stripe price on any interval and cost nothing. A paid tier
+ * whose Stripe prices are not configured yet (e.g. Unlimited without
+ * STRIPE_UNLIMITED_PRICE_ID) must not be shown as a "$0 / Start free" plan.
+ */
 export function planIsFree(plan: BillingPlan) {
-  return !plan.stripe_price_id && !plan.stripe_annual_price_id;
+  return (
+    !plan.stripe_price_id &&
+    !plan.stripe_annual_price_id &&
+    !plan.price_cents &&
+    !plan.is_unlimited
+  );
 }
 
 /** Monthly-equivalent cost of an annual plan, for "billed yearly" copy. */

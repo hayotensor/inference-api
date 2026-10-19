@@ -137,7 +137,7 @@ function PlanCard({
 
   const tier = planTierCopy(plan);
   const creditsLine = plan.is_unlimited
-    ? "Unlimited credits"
+    ? "Unlimited credits, no monthly cap"
     : `${formatNumber(plan.monthly_token_allowance)} credits / month`;
   const features = tier
     ? [...(tier.inherits ? [`Everything in ${tier.inherits}`] : []), creditsLine, ...tier.adds]
@@ -156,7 +156,8 @@ function PlanCard({
           <CardTitle>{plan.name}</CardTitle>
           {plan.name === "Pro" ? <Badge>Popular</Badge> : null}
         </div>
-        <CardDescription>
+        {/* HYP-82: reserve two lines in the 5-up row so every price lines up. */}
+        <CardDescription className="xl:min-h-[3.25em]">
           {plan.is_unlimited ? "Unlimited credits" : `${formatNumber(plan.monthly_token_allowance)} credits per month`}
         </CardDescription>
       </CardHeader>
