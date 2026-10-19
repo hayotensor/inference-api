@@ -45,8 +45,16 @@ class APIKeyService:
                 "Verify an email address, phone number, or wallet before creating API keys"
             )
 
+    @classmethod
+    def _reject_reserved_name(cls, name: str | None) -> None:
+        # The broker adopts (and rotates the secret of) whichever active key has
+        # this name, so a self-service key must never be able to claim it.
+        if name is not None and name.strip().lower() == cls.MANAGED_CHAT_KEY_NAME:
+            raise bad_request("reserved_key_name", f"The key name {name!r} is reserved")
+
     async def create_key(self, user: User, payload: APIKeyCreate) -> APIKeyCreateResponse:
         self._ensure_verified(user)
+        self._reject_reserved_name(payload.name)
         validate_api_key_scopes(payload.scopes)
         active_count = await self.session.scalar(
             select(func.count())
@@ -141,6 +149,16 @@ class APIKeyService:
         db_key.last_four = last_four
         db_key.hashed_key = keyed_hash(full_key)
         db_key.scopes = list(self.MANAGED_CHAT_KEY_SCOPES)
+        # Rotation restores the managed defaults (HYP-56): a restriction left on
+        # the row (an expiry, IP/model allowlist, spend cap) would otherwise
+        # survive every re-mint and permanently break that user's chat.
+        db_key.expires_at = None
+        db_key.allowed_models = None
+        db_key.allowed_ips = None
+        db_key.limit_period = None
+        db_key.credit_limit = None
+        db_key.usd_limit_cents = None
+        db_key.rate_limit_per_minute = settings.api_key_default_rate_limit_per_minute
         self.session.add(db_key)
         await self.session.flush()
         return APIKeyCreateResponse(
@@ -164,8 +182,14 @@ class APIKeyService:
         return list(result.scalars())
 
     async def get_key(self, user: User, key_id: uuid.UUID) -> APIKey:
+        """A self-service key of ``user``'s. The system-managed chat key is not
+        one: like ``list_keys``, every user-facing route treats it as absent."""
         db_key = await self.session.get(APIKey, key_id)
-        if db_key is None or db_key.user_id != user.id:
+        if (
+            db_key is None
+            or db_key.user_id != user.id
+            or db_key.name == self.MANAGED_CHAT_KEY_NAME
+        ):
             raise not_found("API key not found")
         return db_key
 
@@ -184,6 +208,7 @@ class APIKeyService:
         if db_key.revoked_at is not None:
             raise bad_request("api_key_revoked", "A revoked API key cannot be edited")
         update_data = payload.model_dump(exclude_unset=True)
+        self._reject_reserved_name(update_data.get("name"))
         for field in self._NON_NULLABLE_UPDATE_FIELDS:
             if field in update_data and update_data[field] is None:
                 del update_data[field]

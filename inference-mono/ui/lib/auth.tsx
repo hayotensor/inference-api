@@ -21,7 +21,7 @@ type AuthContextValue = {
   logout: () => Promise<void>;
   refreshUser: () => Promise<User | null>;
   /** Mint/refresh the httpOnly SSO cookie and resolve once it is set. */
-  ensureSsoCookie: () => Promise<void>;
+  ensureSsoCookie: () => Promise<boolean>;
 };
 
 /** The chat front door, which may be a path here or its own hostname. */
@@ -57,6 +57,17 @@ export function safeNextPath(raw: string | null | undefined, fallback = "/dashbo
  * `router.replace` cannot leave the origin, so an off-origin destination needs a
  * real browser navigation. Everything else stays a client-side transition.
  */
+/**
+ * A destination off this origin (chat) needs the SSO cookie. When it could not be
+ * minted -- the account has no proven chat identity yet (HYP-56) -- handing over
+ * would just bounce back to /login and loop, so land on the dashboard instead.
+ */
+export function chatSafeNext(next: string, ssoCookieMinted: boolean): string {
+  if (ssoCookieMinted || !/^https?:\/\//.test(next)) return next;
+  toast.error("Verify your email address to use chat.");
+  return "/dashboard";
+}
+
 export function navigateAfterAuth(
   router: { replace: (path: string) => void },
   next: string
@@ -272,8 +283,8 @@ export function AuthGate({
       void (async () => {
         // The destination may leave this origin (chat), so make sure the SSO cookie
         // exists before handing over.
-        await syncSsoCookie();
-        if (!cancelled) navigateAfterAuth(router, next);
+        const minted = await syncSsoCookie();
+        if (!cancelled) navigateAfterAuth(router, chatSafeNext(next, minted));
       })();
       return () => {
         cancelled = true;

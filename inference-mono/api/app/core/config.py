@@ -192,6 +192,10 @@ class Settings(BaseSettings):
             raise ValueError("PHONE_USER_EMAIL_DOMAIN must be set to an owned domain in production")
         if self.wallet_user_email_domain == "wallet-users.inference.dev":
             raise ValueError("WALLET_USER_EMAIL_DOMAIN must be set to an owned domain in production")
+        # HYP-56: a dev convenience that treats every registered address as
+        # proven (and so satisfies the API-key verify gate) is refused outright.
+        if self.auto_verify_new_users:
+            raise ValueError("AUTO_VERIFY_NEW_USERS must not be enabled in production")
         return self
 
     @property

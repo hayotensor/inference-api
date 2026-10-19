@@ -76,7 +76,7 @@ function ChatButton({
   ensureSsoCookie,
   className
 }: {
-  ensureSsoCookie: () => Promise<void>;
+  ensureSsoCookie: () => Promise<boolean>;
   className?: string;
 }) {
   const openChat = React.useCallback(

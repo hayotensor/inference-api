@@ -29,16 +29,19 @@ export default function OAuthCallbackPage() {
 
     async function completeOAuth() {
       try {
-        const accessToken = searchParams.get("access_token");
-        const refreshToken = searchParams.get("refresh_token");
-        const userParam = searchParams.get("user");
+        // The API hands the session over in the URL fragment (never sent to a
+        // server, so it stays out of access logs -- HYP-56).
+        const handoff = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+        const accessToken = handoff.get("access_token");
+        const refreshToken = handoff.get("refresh_token");
+        const userParam = handoff.get("user");
         if (accessToken && refreshToken && userParam) {
           const parsed = JSON.parse(decodeURIComponent(userParam));
           setTokenResponse({
             access_token: accessToken,
             refresh_token: refreshToken,
             token_type: "bearer",
-            expires_in: Number(searchParams.get("expires_in") ?? 3600),
+            expires_in: Number(handoff.get("expires_in") ?? 3600),
             user: parsed
           } satisfies TokenResponse);
           router.replace("/dashboard");

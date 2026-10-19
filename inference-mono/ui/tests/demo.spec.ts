@@ -203,10 +203,6 @@ test("server routes cannot contact the backend or alter a real SSO cookie in dem
   }
   const attestation = require("../app/api/attestation-status/route") as typeof import("../app/api/attestation-status/route");
   expect(await (await attestation.GET()).json()).toMatchObject({ status: "unverified", reason: "local_demo" });
-  const inference = require("../app/api/guest-inference/route") as typeof import("../app/api/guest-inference/route");
-  expect((await inference.POST(new Request("http://localhost:3001/api/guest-inference", {
-    method: "POST", headers: { "X-Guest-Id": "demo" }, body: JSON.stringify({ prompt: "Hello" })
-  }))).status).toBe(501);
   const status = require("../app/api/status/route") as typeof import("../app/api/status/route");
   expect((await (await status.GET()).json()).groups[0].name).toBe("Demo services");
   const { ensureSampler } = require("../lib/server/status-history") as typeof import("../lib/server/status-history");

@@ -6,24 +6,8 @@ export type ApiErrorDetail =
       code?: string;
       message?: string;
       detail?: string;
-      // Present on the guest-sandbox 429 (POST /v1/guest/inference) so the
-      // homepage can show "X remaining" without a second round trip.
-      remaining_today?: number;
     }
   | Array<unknown>;
-
-export interface GuestInferenceResponse {
-  id: string;
-  model: string;
-  output: string;
-  usage: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
-  attested: boolean;
-  remaining_today: number;
-}
 
 export interface User {
   id: UUID;

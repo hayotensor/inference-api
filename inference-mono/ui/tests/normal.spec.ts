@@ -143,13 +143,11 @@ test("normal SSO calls and server cookie behavior are preserved", async () => {
   expect((await sso.DELETE()).headers.get("set-cookie")).toContain("Max-Age=0");
 });
 
-test("normal inference and attestation still call their configured backends", async () => {
-  const inference = require("../app/api/guest-inference/route") as typeof import("../app/api/guest-inference/route");
-  const response = await inference.POST(new Request("http://localhost/api/guest-inference", {
-    method: "POST", headers: { "X-Guest-Id": "guest" }, body: JSON.stringify({ prompt: "Hello" })
-  }));
-  expect(await response.json()).toEqual({ backend: true });
-  expect(requests.at(-1)?.url).toBe("http://inference.example.invalid/v1/guest/inference");
+test("normal attestation still calls its configured backends", async () => {
+  // HYP-56: the legacy unauthenticated sandbox proxy (/api/guest-inference ->
+  // POST /v1/guest/inference) was removed; guest chat goes through the broker.
+  const { existsSync } = require("node:fs") as typeof import("node:fs");
+  expect(existsSync(require("node:path").join(__dirname, "../app/api/guest-inference/route.ts"))).toBe(false);
   const attestation = require("../app/api/attestation-status/route") as typeof import("../app/api/attestation-status/route");
   expect((await (await attestation.GET()).json()).reason).toBe("malformed_response");
   expect(requests.slice(-2).map((request) => request.url)).toEqual([

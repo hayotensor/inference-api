@@ -15,12 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.token_revocation import is_jti_revoked, revoke_access_token
 from app.core.config import settings
-from app.core.errors import unauthorized
+from app.core.errors import forbidden, unauthorized
 from app.core.security import (
     constant_time_equal,
     expires_in,
     generate_refresh_token,
     is_past,
+    is_synthetic_phone_email,
+    is_synthetic_wallet_email,
     keyed_hash,
     utcnow,
 )
@@ -329,9 +331,31 @@ class AuthService:
         strategy = get_jwt_strategy()
         return await strategy.write_token(user)
 
+    @staticmethod
+    def chat_identity_proven(user: User) -> bool:
+        """Is ``user.email`` an identity the caller has actually proven?
+
+        The SSO token's ``email`` becomes the Open-WebUI identity, and Open-WebUI
+        keys accounts (and their chat history) on it. An unproven address --
+        registered without verifying, or PATCHed onto the account -- must never
+        be asserted, or whoever claims an address a previous owner used inherits
+        that owner's chats (HYP-56). Wallet/phone accounts carry a synthetic
+        address derived from the proven wallet/phone, which counts.
+        """
+        if user.is_verified:
+            return True
+        email = user.email or ""
+        if is_synthetic_wallet_email(email):
+            return user.wallet_verified_at is not None
+        if is_synthetic_phone_email(email):
+            return user.phone_verified_at is not None
+        return False
+
     def issue_sso_token(self, user: User) -> tuple[str, int]:
         """Mint a medium-TTL SSO JWT the edge Worker verifies (shared secret) to
         identify the logged-in user when routing to the /chat surface."""
+        if not self.chat_identity_proven(user):
+            raise forbidden("Verify your email address before using chat")
         data = {
             "sub": str(user.id),
             "email": user.email,

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.service import write_audit_log
 from app.auth.service import UserManager
 from app.core.errors import bad_request
+from app.core.security import is_synthetic_phone_email, is_synthetic_wallet_email
 from app.db.models.user import User
 from app.users.schemas import UserUpdate
 
@@ -39,6 +40,14 @@ class UserService:
                 "Your email is managed by your linked sign-in provider "
                 f"({', '.join(user.oauth_providers)}) and can't be changed here.",
             )
+        if (
+            payload.email is not None
+            and payload.email.lower() != user.email.lower()
+            and (is_synthetic_phone_email(payload.email) or is_synthetic_wallet_email(payload.email))
+        ):
+            # Synthetic wallet/phone addresses are platform-derived identities
+            # (they count as proven for chat SSO); nobody may claim one by hand.
+            raise bad_request("email_reserved", "This email address is reserved and can't be used")
         try:
             updated = await self.user_manager.update(payload, user, safe=True, request=request)
         except UserAlreadyExists as exc:

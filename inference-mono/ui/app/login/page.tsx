@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { apiErrorMessage, authApi } from "@/lib/api";
-import { AuthGate, navigateAfterAuth, safeNextPath, useAuth } from "@/lib/auth";
+import { AuthGate, chatSafeNext, navigateAfterAuth, safeNextPath, useAuth } from "@/lib/auth";
 import { shortenAddress } from "@/lib/format";
 import { DEMO_EMAIL, DEMO_PASSWORD, UI_DEMO_MODE } from "@/lib/demo-mode";
 
@@ -44,8 +44,8 @@ export default function LoginPage() {
     // setTokenResponse mints the SSO cookie in the background; wait for it when the
     // destination hands off to another origin (chat), or that hop sees no cookie
     // and bounces straight back here.
-    await ensureSsoCookie();
-    navigateAfterAuth(router, next);
+    const minted = await ensureSsoCookie();
+    navigateAfterAuth(router, chatSafeNext(next, minted));
   };
 
   const mutation = useMutation({

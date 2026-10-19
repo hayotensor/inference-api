@@ -31,7 +31,6 @@ import type {
   BillingSubscription,
   EvmNonceResponse,
   EvmWallet,
-  GuestInferenceResponse,
   MessageResponse,
   ModelCatalogResponse,
   ReferralCodeUpdate,
@@ -294,17 +293,20 @@ export function isVerificationRequiredError(error: unknown) {
 
 /**
  * Set/refresh the httpOnly SSO cookie (via the same-origin route handler) so the
- * edge Worker can identify this user when routing to /chat. Best-effort.
+ * edge Worker can identify this user when routing to /chat. Best-effort; resolves
+ * to whether a cookie was minted. The API refuses (403) until the account's chat
+ * identity is proven -- a verified email, or a verified wallet/phone (HYP-56).
  */
-export async function syncSsoCookie() {
-  if (UI_DEMO_MODE) return;
-  if (typeof window === "undefined") return;
+export async function syncSsoCookie(): Promise<boolean> {
+  if (UI_DEMO_MODE) return false;
+  if (typeof window === "undefined") return false;
   const token = await accessTokenForAuthenticatedRequest();
-  if (!token) return;
-  await fetch("/api/sso-cookie", {
+  if (!token) return false;
+  const response = await fetch("/api/sso-cookie", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` }
-  }).catch(() => {});
+  }).catch(() => null);
+  return Boolean(response?.ok);
 }
 
 export async function clearSsoCookie() {
@@ -985,30 +987,6 @@ export const adminApi = {
 export const modelsApi = {
   catalog(options: ApiCallOptions = {}) {
     return apiRequest<ModelCatalogResponse>("/models", { signal: options.signal });
-  }
-};
-
-/**
- * The homepage's unauthenticated "try it now" sandbox (HYP-67). Goes through
- * this Next.js server's own `/api/guest-inference` route (NOT
- * `baseUrl: INFERENCE_API_BASE_URL` -- see that route's docstring for why:
- * the inference-api is not reachable directly from the browser in this
- * deployment), which forwards the real visitor IP onward. Identifies the
- * browser with a soft, client-generated id -- see `lib/guest-id.ts`. The
- * server independently caps this per-IP too; the client-side count this
- * returns is only ever the per-browser one.
- */
-export const guestApi = {
-  inference(prompt: string, guestId: string, options: ApiCallOptions = {}) {
-    return apiRequest<GuestInferenceResponse>("/api/guest-inference", {
-      method: "POST",
-      // Relative to the current origin -- this is a same-origin Next.js route,
-      // not the control-plane API that `apiRequest` targets by default.
-      baseUrl: "",
-      headers: { "X-Guest-Id": guestId },
-      body: { prompt },
-      signal: options.signal
-    });
   }
 };
 

@@ -310,16 +310,18 @@ async def _oauth_callback(
     # registered OAuth redirect_uri), so the response has to be something a
     # browser can land on -- not the raw TokenResponse JSON. Hand off to the
     # frontend's own callback page (app/auth/callback/[provider]/page.tsx),
-    # which already knows how to pick these query params up and store the
-    # session. quote (not the default quote_plus) so decodeURIComponent on
-    # the JS side doesn't misread a literal "+" as an encoded space.
+    # which picks these up and stores the session. They ride in the URL
+    # FRAGMENT, not the query (HYP-56): a fragment is never sent to a server,
+    # so the 30-day refresh token stays out of Cloudflare/Next access logs and
+    # Referer headers. quote (not the default quote_plus) so decodeURIComponent
+    # on the JS side doesn't misread a literal "+" as an encoded space.
     params = {
         "access_token": result.access_token,
         "refresh_token": result.refresh_token,
         "expires_in": str(result.expires_in),
         "user": result.user.model_dump_json(),
     }
-    redirect_url = f"{settings.app_url}/auth/callback/{provider}?{urlencode(params, quote_via=quote)}"
+    redirect_url = f"{settings.app_url}/auth/callback/{provider}#{urlencode(params, quote_via=quote)}"
     return RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
 
 
