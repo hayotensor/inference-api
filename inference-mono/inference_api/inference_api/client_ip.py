@@ -6,8 +6,7 @@ rationale: honoring ``X-Forwarded-For`` unconditionally lets any client spoof
 its own IP, so it is only trusted from a hop this deployment explicitly
 configured). This is a deliberately small, standalone copy rather than a
 shared import -- the two planes are separate deployables that do not depend on
-each other's code -- used by the anonymous guest-inference abuse limiter (see
-``inference_api.guest_limits`` / HYP-67) and the per-API-key IP allowlist
+each other's code -- used by the per-API-key IP allowlist
 (``inference_api.api_keys`` / HYP-45).
 
 Unlike the control plane, this plane has no ``ClientIPMiddleware`` rewriting

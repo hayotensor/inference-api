@@ -735,6 +735,14 @@ async def _routed_stream_response(
                 if event is not None and event.status == "reserved":
                     completion = usage.completion_tokens or 0
                     prompt = usage.prompt_tokens or input_tokens
+                    if not (completion or usage.total_tokens) and stream.content_chunks:
+                        # HYP-56: the client hung up after receiving generated
+                        # text but before the trailing usage chunk. Releasing
+                        # here (the old behavior) made "read the answer, drop
+                        # the connection at finish_reason" free inference, so
+                        # bill what was actually relayed (~1 token per chunk,
+                        # capped at the reservation's own max_tokens).
+                        completion = min(stream.content_chunks, inference_payload.max_tokens)
                     if completion or usage.total_tokens:
                         event = await svc.settle_inference_usage(
                             event,

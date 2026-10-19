@@ -306,6 +306,16 @@ class ProvisionerService:
         # 2. verify via the shared verifier (single source of truth), pinning the
         #    platform model allowlist for THIS model_id (None -> check skipped).
         allowlist = await self._model_allowlist(mm.model_id)
+        # HYP-56 (P2-16): an UNBOUND enclave (doc.miner is None) proves nothing
+        # about WHICH registered miner it belongs to, so outside the dev gate it
+        # is refused outright: otherwise any attesting enclave behind a
+        # registered tee_endpoint would be provisioned with this miner's
+        # credentials and earn under its hotkey.
+        if doc.miner is None and not settings.allow_dev_attestation:
+            raise ProvisionError(
+                "enclave is not bound to a miner (attestation has no miner hash); "
+                "bind it to the registration hotkey before provisioning"
+            )
         # The running enclave is UNBOUND: its report_data carries miner_hash=None
         # (doc.miner is None), so there is no attested miner hash to bind the
         # registration hotkey against. Only enforce the registration<->attestation

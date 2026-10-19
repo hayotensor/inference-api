@@ -140,6 +140,11 @@ class StreamForward:
     usage: Usage = field(default_factory=Usage)
     latency_ms: int = 0
     ttft_ms: int | None = None
+    # SSE chunks that carried generated text, as relayed to the client. Engines
+    # emit roughly one token per content delta, so this is the billing fallback
+    # when a client hangs up after receiving the text but before the trailing
+    # ``usage`` chunk (HYP-56) -- see product_routes._routed_stream_response.
+    content_chunks: int = 0
     _started: float = field(default_factory=time.perf_counter)
     _settled: bool = False
 
@@ -169,6 +174,19 @@ class StreamForward:
             usage = obj.get("usage") if isinstance(obj, dict) else None
             if isinstance(usage, dict):
                 self.usage = Usage.from_dict(usage)
+            choices = obj.get("choices") if isinstance(obj, dict) else None
+            if isinstance(choices, list):
+                for choice in choices:
+                    if not isinstance(choice, dict):
+                        continue
+                    delta = choice.get("delta")
+                    text = (
+                        (delta.get("content") or delta.get("reasoning_content"))
+                        if isinstance(delta, dict)
+                        else None
+                    ) or choice.get("text")
+                    if text:
+                        self.content_chunks += 1
 
     async def aclose(self) -> None:
         if self._settled:

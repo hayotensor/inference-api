@@ -32,8 +32,8 @@ class Settings(BaseSettings):
     # IPs/CIDRs of reverse-proxy hops this plane trusts to set X-Forwarded-For.
     # Empty by default (fail closed to the raw socket peer) -- mirrors
     # app/core/rate_limit.py's ``trusted_proxy_ips`` on the control plane. Only
-    # consumer today is inference_api.client_ip.resolve_client_ip (see HYP-67's
-    # guest-inference IP ceiling).
+    # consumer today is inference_api.client_ip.resolve_client_ip (the HYP-45
+    # per-API-key IP allowlist).
     trusted_proxy_ips: Annotated[list[str], NoDecode] = []
     # When the immediate peer is one of ``trusted_proxy_ips``, prefer the
     # ``CF-Connecting-IP`` header (set by Cloudflare / cloudflared to the real
@@ -50,24 +50,6 @@ class Settings(BaseSettings):
     # per-credit rate any bundle charges, so the cap errs on stopping early.
     # Must match the control plane's API_KEY_USD_CENTS_PER_MILLION_CREDITS.
     api_key_usd_cents_per_million_credits: int = Field(default=1_000, ge=1)
-
-    # --- Anonymous "sandbox" inference (HYP-67) ---------------------------- #
-    # The homepage's unauthenticated try-it-now box. Off switch kept separate
-    # from ``rate_limit_enabled`` -- this endpoint's two daily ceilings
-    # (guest_limits.check_and_increment_guest_limits) are ALWAYS enforced
-    # whenever the endpoint is enabled, and deliberately FAIL CLOSED on a Redis
-    # error (unlike the rest of this plane's rate limiting, which honors
-    # ``rate_limit_fail_open``) -- this is the platform's first anonymous-facing
-    # compute surface, so a Redis outage must not silently grant free inference.
-    guest_inference_enabled: bool = True
-    # Explicit operator override for the one model anonymous requests are
-    # always forced onto. Unset (default) -> resolved at request time to
-    # whichever ACTIVE model_pricing row has the lowest token_multiplier (see
-    # inference_api.pricing.resolve_guest_model_id).
-    guest_model_id: str | None = None
-    guest_max_tokens: int = Field(default=256, ge=1, le=4096)
-    guest_client_daily_limit: int = Field(default=10, ge=0)
-    guest_ip_daily_limit: int = Field(default=30, ge=0)
 
     router_reservation_ttl_seconds: int = Field(default=900, ge=60, le=86_400)
     router_max_input_tokens: int = Field(default=1_000_000, ge=1)
@@ -298,6 +280,17 @@ class Settings(BaseSettings):
             raise ValueError("RATE_LIMIT_FAIL_OPEN must be false in production")
         if self.allow_dev_echo_fallback:
             raise ValueError("ALLOW_DEV_ECHO_FALLBACK must not be enabled in production")
+        # HYP-56: every dev/mock attestation switch is refused outright in
+        # production. Each of these would let a non-TEE (or unverifiable) box be
+        # provisioned with real credentials and serve billed traffic.
+        if self.allow_dev_attestation:
+            raise ValueError("ALLOW_DEV_ATTESTATION must not be enabled in production")
+        if self.verifier_backend in {"stub", "mock", "dev"}:
+            raise ValueError(
+                f"VERIFIER_BACKEND={self.verifier_backend} is a dev/test backend and is refused in production"
+            )
+        if not self.tls_pin_enforce:
+            raise ValueError("TLS_PIN_ENFORCE must be true in production")
         return self
 
 

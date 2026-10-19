@@ -98,39 +98,6 @@ class InferenceResponse(BaseModel):
     attestation: AttestationReceipt | None = None
 
 
-class GuestInferenceRequest(BaseModel):
-    """Anonymous sandbox request body (HYP-67, ``POST /v1/guest/inference``).
-
-    Deliberately does NOT accept a caller-chosen ``max_tokens``: the server
-    always clamps to ``settings.guest_max_tokens`` regardless of what a client
-    sends. ``model``/``max_tokens`` are accepted-and-ignored (``extra="ignore"``
-    covers any other field) purely so a client that copy-pastes an
-    ``InferenceRequest``-shaped body doesn't get a 422 -- the values are never
-    read; see ``guest_routes.run_guest_inference``, which forces both
-    server-side no matter what.
-    """
-
-    model_config = ConfigDict(extra="ignore")
-
-    prompt: str = Field(min_length=1, max_length=PROMPT_MAX_LENGTH)
-
-
-class GuestInferenceResponse(BaseModel):
-    id: str
-    object: Literal["inference"] = "inference"
-    model: str
-    output: str
-    usage: dict[str, int]
-    attested: bool
-    attestation: AttestationReceipt | None = None
-    # Requests left for THIS browser (X-Guest-Id) in the current UTC day, after
-    # this one. A soft, client-scoped number -- the enforced ceiling that
-    # actually caps abuse is the per-IP one, which is not exposed here (giving
-    # an anonymous caller its own remaining-IP-budget count would just tell an
-    # attacker exactly how close to the shared cap they are).
-    remaining_today: int
-
-
 class OpenAIChatMessage(BaseModel):
     model_config = ConfigDict(extra="allow")
 

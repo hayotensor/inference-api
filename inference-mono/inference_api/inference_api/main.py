@@ -15,7 +15,6 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from inference_api.allowlist_routes import router as allowlist_router
 from inference_api.attest_routes import router as attest_router
 from inference_api.config import settings
-from inference_api.guest_routes import router as guest_router
 from inference_api.logging import configure_logging, request_id_ctx
 from inference_api.maintenance.tasks import MaintenanceLoop
 from inference_api.miners.routes import router as miners_router
@@ -66,12 +65,6 @@ _PUBLIC_THROTTLE_PATH_PREFIXES: tuple[str, ...] = (
     "/docs",
     "/redoc",
     "/openapi.json",
-    # HYP-67: the anonymous sandbox endpoint has its own much tighter daily
-    # ceilings (inference_api.guest_limits), but this fast in-process 120/min
-    # throttle is still useful defense in depth against a burst script trying
-    # many client_ids/IPs per second before those daily counters would ever
-    # trip.
-    "/v1/guest",
 )
 _PUBLIC_THROTTLE_LIMIT_PER_MINUTE = 120
 _public_throttle_counters: dict[tuple[str, int], int] = {}
@@ -202,7 +195,6 @@ def create_app() -> FastAPI:
             "Content-Type",
             "X-API-Key",
             "X-User-API-Key",
-            "X-Guest-Id",
             settings.request_id_header,
         ],
     )
@@ -249,7 +241,6 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(product_router)
-    app.include_router(guest_router)
     app.include_router(router_service_router)
     app.include_router(miners_router)
     app.include_router(allowlist_router)
