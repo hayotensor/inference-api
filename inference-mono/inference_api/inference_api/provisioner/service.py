@@ -42,6 +42,7 @@ from talaris_attest import (
     ModelAllowlistEntry,
     NvidiaPolicy,
     build_expected_claims as build_expected_claims_factory,
+    load_measurement_allowlist,
     verify_attestation,
 )
 from talaris_contracts import (
@@ -137,6 +138,9 @@ def build_expected_claims(
         intel=IntelPolicy(
             allowed_tcb_statuses=settings.intel_allowed_tcb_statuses,
             require_collateral=settings.intel_require_collateral,
+            # Enclave SOFTWARE pin (published-build MRTD/RTMR allowlist; HYP-56).
+            allowed_measurements=load_measurement_allowlist(settings.intel_tdx_measurements),
+            require_measurement_pin=settings.intel_require_measurement_pin,
         ),
         require_gpu_evidence=settings.require_gpu_evidence,
         require_tdx_quote=settings.require_tdx_quote,

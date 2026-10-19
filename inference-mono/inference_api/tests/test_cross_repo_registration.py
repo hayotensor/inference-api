@@ -63,6 +63,7 @@ async def test_subnet_client_payload_accepted_by_inference_api(client, seed_mine
         tee_endpoint="https://miner-x.tee.test:8000",
         ed25519_signing_key=hotkey,
         inventory_provider=inventory,
+        service_token=miner_token.raw_token,
     )
 
     # The subnet builds + signs the SelfRegistration via the shared talaris_contracts
@@ -109,6 +110,7 @@ async def test_subnet_client_tampered_payload_rejected(client, seed_miner_token)
         subnet_node_id=12,
         tee_endpoint="https://miner-y.tee.test:8000",
         ed25519_signing_key=hotkey,
+        service_token=miner_token.raw_token,
     )
     reg = reg_client.build_registration()
     tampered = reg.model_copy(update={"tee_endpoint": "https://evil.tee.test:8000"})
@@ -119,3 +121,40 @@ async def test_subnet_client_tampered_payload_rejected(client, seed_miner_token)
         json=tampered.model_dump(mode="json"),
     )
     assert resp.status_code in (401, 403), resp.text
+
+
+class _Borrowed:
+    """Hand the fixture's ASGI client to the subnet client without letting it close it."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    async def __aenter__(self):
+        return self._inner
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+async def test_subnet_client_registers_and_heartbeats_over_http(client, seed_miner_token):
+    """HYP-56: the subnet node's OWN register + heartbeat calls (not a hand-built
+    request) must be accepted. Before the fix it sent no rk_ token -> 401 on both."""
+    subnet = _load_subnet_client()
+    miner_token = await seed_miner_token()
+
+    reg_client = subnet.InferenceApiRegistrationClient(
+        inference_api_url=str(client.base_url).rstrip("/"),
+        peer_id="12D3KooWCrossRepo3",
+        subnet_node_id=13,
+        tee_endpoint="https://miner-z.tee.test:8000",
+        ed25519_signing_key=SigningKey.generate(),
+        inventory_provider=lambda: {"hosted_models": ["demo-chat-001"]},
+        service_token=miner_token.raw_token,
+        http_client_factory=lambda: _Borrowed(client),
+    )
+    miner_id = await reg_client.register_once()
+    assert miner_id is not None
+    import uuid
+
+    uuid.UUID(miner_id)  # the platform-issued miner id, not the subnet_node_id fallback
+    assert await reg_client.heartbeat_once() is True

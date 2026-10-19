@@ -168,6 +168,16 @@ class Settings(BaseSettings):
     # allowed_tcb_statuses=None keeps the backend default set.
     intel_require_collateral: bool = True
     intel_allowed_tcb_statuses: Annotated[frozenset[str] | None, NoDecode] = None
+    # Enclave SOFTWARE pin (HYP-56). Without it, any software running in a genuine
+    # TD on genuine hardware attests successfully: the DCAP chain proves "real Intel
+    # TDX", not "the published Talaris enclave build". INTEL_TDX_MEASUREMENTS is the
+    # published-build allowlist: a JSON list of {mrtd, rtmr0..rtmr3, label} objects,
+    # inline or "@/path/to/builds.json" (see talaris_attest.load_measurement_allowlist).
+    # When set, a miner attests only if its hardware-verified MRTD/RTMRs match an
+    # entry. INTEL_REQUIRE_MEASUREMENT_PIN=true makes an UNSET allowlist fail every
+    # attestation (the production opt-in once a build's measurements are published).
+    intel_tdx_measurements: str | None = None
+    intel_require_measurement_pin: bool = False
 
     # --- Hardware-evidence requirements (passthrough to the factory) ------- #
     require_tdx_quote: bool = True
@@ -177,6 +187,11 @@ class Settings(BaseSettings):
     chain_rpc_url: str | None = None
     chain_required: bool = False
     chain_min_class: str | None = "Included"
+    # The Hypertensor subnet this platform serves (the real on-chain subnet id, not a
+    # friendly id). The class gate looks the miner up as
+    # Network.PeerIdSubnetNodeId(subnet_id, peer_id) -> Network.SubnetNodesData, so
+    # it is required for the chain lookup.
+    chain_subnet_id: int | None = None
     # Subnet epoch derivation: epoch = block_number // epoch_length, matching the
     # subnet's own ``Hypertensor.get_epoch``. The length is read from the chain
     # constant ``Network::EpochLength`` and cached; this setting is the fallback
@@ -210,7 +225,9 @@ class Settings(BaseSettings):
     tls_pin_enforce: bool = True
 
     # Self-registration ---------------------------------------------------- #
-    registration_key_type: Literal["sr25519", "ed25519"] = "sr25519"
+    # ed25519 is the only scheme the shipped subnet node signs with (its libp2p key),
+    # and the only one whose key maps to the libp2p peer ID the chain records.
+    registration_key_type: Literal["sr25519", "ed25519"] = "ed25519"
     registration_nonce_ttl_seconds: int = Field(default=300, ge=30, le=3600)
 
     # Background maintenance intervals (seconds) --------------------------- #
@@ -236,6 +253,17 @@ class Settings(BaseSettings):
             return value
         items = _split_csv(value)
         return frozenset(items) if items else None
+
+    @field_validator("intel_tdx_measurements", mode="after")
+    @classmethod
+    def validate_tdx_measurements(cls, value: str | None) -> str | None:
+        # Parse once at startup so a typo fails loudly instead of disabling the pin.
+        if value is None or not str(value).strip():
+            return None
+        from talaris_attest import load_measurement_allowlist
+
+        load_measurement_allowlist(value)
+        return value
 
     @field_validator("mesh_router_url", "chain_rpc_url", mode="before")
     @classmethod

@@ -22,6 +22,8 @@ import logging
 import time
 from dataclasses import dataclass
 
+from talaris_contracts import ed25519_peer_id
+
 from inference_api.config import settings
 
 logger = logging.getLogger(__name__)
@@ -155,23 +157,54 @@ class ChainClient:
         return epoch
 
     def get_node_by_hotkey(self, hotkey: str) -> ChainNode:
+        """Resolve the chain node for a platform registration key.
+
+        The platform identity is the miner's ed25519 registration key, NOT a chain
+        hotkey (Hypertensor hotkeys are 20-byte EVM accounts). The subnet node signs
+        with that same key, so its libp2p peer ID — which the chain records and
+        indexes — is derived from it. Lookup (real ``hypertensor-blockchain`` network
+        pallet storage):
+
+            Network.PeerIdSubnetNodeId(subnet_id, peer_id) -> subnet_node_id (0 = none)
+            Network.SubnetNodesData(subnet_id, subnet_node_id) -> SubnetNode
+                (Idle/Included/Validator nodes; ``classification.node_class``)
+            Network.RegisteredSubnetNodesData(subnet_id, subnet_node_id)
+                (nodes still in the registration queue -> "Registered")
+
+        Returns ``ChainNode(None, None)`` when the peer is not registered on the subnet
+        (the class gate then rejects it when ``chain_required``).
+        """
         if not self.rpc_url:
             raise ChainConfigError("Subnet chain RPC URL is required")
+        subnet_id = settings.chain_subnet_id
+        if subnet_id is None:
+            raise ChainConfigError("CHAIN_SUBNET_ID is required for the chain class check")
+        try:
+            peer_id = ed25519_peer_id(hotkey)
+        except ValueError as exc:
+            raise ChainReadError(
+                f"registration key is not an ed25519 public key; cannot derive its peer ID: {exc}"
+            ) from exc
         try:
             from substrateinterface import SubstrateInterface  # type: ignore
 
             substrate = SubstrateInterface(url=self.rpc_url)
             try:
-                node_id_q = substrate.query("Network", "HotkeySubnetNodeId", [hotkey])
-                subnet_node_id = (
-                    int(node_id_q.value) if node_id_q is not None and node_id_q.value is not None else None
+                node_id_q = substrate.query("Network", "PeerIdSubnetNodeId", [subnet_id, peer_id])
+                subnet_node_id = _query_int(node_id_q)
+                if not subnet_node_id:
+                    return ChainNode(subnet_node_id=None, classification=None)
+                classification = _node_class(
+                    substrate.query("Network", "SubnetNodesData", [subnet_id, subnet_node_id]),
+                    subnet_node_id,
                 )
-                classification = None
-                if subnet_node_id is not None:
-                    class_q = substrate.query(
-                        "Network", "SubnetNodeClass", [subnet_node_id]
+                if classification is None:
+                    classification = _node_class(
+                        substrate.query(
+                            "Network", "RegisteredSubnetNodesData", [subnet_id, subnet_node_id]
+                        ),
+                        subnet_node_id,
                     )
-                    classification = class_q.value if class_q is not None else None
                 return ChainNode(subnet_node_id=subnet_node_id, classification=classification)
             finally:
                 close = getattr(substrate, "close", None)
@@ -181,6 +214,35 @@ class ChainClient:
             raise
         except Exception as exc:  # noqa: BLE001 - any RPC/decode failure
             raise ChainReadError(str(exc)) from exc
+
+
+def _query_value(result):
+    return getattr(result, "value", result)
+
+
+def _query_int(result) -> int:
+    value = _query_value(result)
+    if value is None:
+        return 0
+    return int(str(value))
+
+
+def _node_class(result, subnet_node_id: int) -> str | None:
+    """``classification.node_class`` of a decoded ``SubnetNode``, or None if the
+    record is the storage default (``id`` != the node we asked for)."""
+    data = _query_value(result)
+    if not isinstance(data, dict):
+        return None
+    try:
+        if int(str(data.get("id"))) != int(subnet_node_id):
+            return None
+    except (TypeError, ValueError):
+        return None
+    classification = data.get("classification") or {}
+    node_class = classification.get("node_class") if isinstance(classification, dict) else None
+    if isinstance(node_class, dict) and len(node_class) == 1:  # {"Included": None}
+        node_class = next(iter(node_class))
+    return str(node_class) if node_class else None
 
 
 class MockChainClient(ChainClient):
