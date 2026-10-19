@@ -22,7 +22,8 @@ import type {
 import styles from "./status.module.css";
 
 // HYP-58: per-model status page (see status.openrouter.ai for the pattern):
-// a live snapshot plus a 30-day uptime bar per model. History is sampled by
+// a live snapshot plus a 90-day uptime bar per component (hover a day for
+// its date, status, and uptime). History is sampled by
 // the Next.js server (lib/server/status-history.ts) since the inference-api
 // only exposes the current state; latency is not shown for the same reason.
 //
@@ -182,42 +183,103 @@ function IncidentRow({ incident }: { incident: StatusIncident }) {
   );
 }
 
+// Uptime bar colors (HYP-58 feedback): green = operational, yellow = degraded,
+// red = down, neutral = no samples that day. The hues live in
+// status.module.css so they stay scoped to the bars.
+const BAR_CLASS: Record<ModelServiceStatus | "none", string> = {
+  operational: styles.barOperational,
+  degraded: styles.barDegraded,
+  down: styles.barDown,
+  none: styles.barNone
+};
+
+// Phones show the most recent 30 days so each bar stays wide enough to tap.
+const MOBILE_DAYS = 30;
+
+function formatDay(day: string) {
+  // `day` is a UTC calendar date; format it in UTC so it never shifts a day.
+  return new Date(`${day}T00:00:00Z`).toLocaleDateString(undefined, {
+    timeZone: "UTC",
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  });
+}
+
+function formatUptime(uptime: number) {
+  const pct = uptime * 100;
+  return `${pct === 100 || pct === 0 ? pct.toFixed(0) : pct.toFixed(2)}% uptime`;
+}
+
 function UptimeBar({ history, uptime }: { history: StatusHistoryDay[]; uptime: number | null }) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [active, setActive] = React.useState<{ index: number; left: number } | null>(null);
+  const mobileStart = Math.max(0, history.length - MOBILE_DAYS);
+
+  const show = (index: number, target: HTMLElement) => {
+    const container = containerRef.current;
+    if (!container) return;
+    const box = container.getBoundingClientRect();
+    const bar = target.getBoundingClientRect();
+    setActive({ index, left: bar.left - box.left + bar.width / 2 });
+  };
+
+  const day = active ? history[active.index] : null;
+  const width = containerRef.current?.clientWidth ?? 0;
+  // Keep the 12rem tooltip inside the card instead of overflowing at the ends.
+  const tooltipLeft = active ? Math.min(Math.max(active.left, 96), Math.max(96, width - 96)) : 0;
+
   return (
-    <div className="w-full overflow-x-auto">
-      <div className="min-w-max">
-        <svg
-          className={cn("block", styles.uptimeBar)}
-          width={Math.max(0, history.length * 5 - 2)}
-          height={32}
-          role="img"
-          aria-label="Daily uptime history"
-        >
+    <div>
+      <div
+        ref={containerRef}
+        className="relative"
+        onMouseLeave={() => setActive(null)}
+        role="img"
+        aria-label={`Daily uptime history: ${uptime === null ? "no data yet" : formatUptime(uptime)}`}
+      >
+        <div className="flex h-8 gap-[2px]" aria-hidden="true">
           {history.map((d, index) => (
-            <rect
+            <div
               key={d.day}
-              // Inset the outage stroke so every tick paints the same 3 × 32px footprint.
-              x={index * 5 + (d.status === "down" ? 0.5 : 0)}
-              y={d.status === "down" ? 0.5 : 0}
-              width={d.status === "down" ? 2 : 3}
-              height={d.status === "down" ? 31 : 32}
-              strokeWidth={1}
-              // Outages also have a hollow shape; missing samples stay neutral.
-              className={statusStyles[getStatusVariant(d.status ?? "unknown")].indicator}
-            >
-              <title>
-                {d.status === null
-                  ? `${d.day}: no data`
-                  : `${d.day}: ${STATUS_LABELS[d.status]}, ${((d.uptime ?? 0) * 100).toFixed(1)}% up`}
-              </title>
-            </rect>
+              className={cn(
+                "h-full min-w-0 flex-1 rounded-[1px] transition-opacity",
+                BAR_CLASS[d.status ?? "none"],
+                index < mobileStart && "hidden sm:block",
+                active && active.index !== index && "opacity-60"
+              )}
+              onMouseEnter={(event) => show(index, event.currentTarget)}
+              onPointerDown={(event) => show(index, event.currentTarget)}
+            />
           ))}
-        </svg>
-        <div className="mt-1 flex justify-between text-[11px] text-muted-foreground">
-          <span>{history.length} days ago</span>
-          <span>{uptime === null ? "No data yet" : `${(uptime * 100).toFixed(2)}% uptime`}</span>
-          <span>Today</span>
         </div>
+        {day ? (
+          <div
+            className="pointer-events-none absolute bottom-full z-20 mb-2 w-48 -translate-x-1/2 rounded-md border border-border bg-popover px-3 py-2 text-popover-foreground shadow-lg"
+            style={{ left: tooltipLeft }}
+            role="tooltip"
+          >
+            <div className="text-xs font-medium">{formatDay(day.day)}</div>
+            <div className="mt-1 flex items-center gap-1.5 text-xs">
+              <span className={cn("h-2 w-2 shrink-0 rounded-full", BAR_CLASS[day.status ?? "none"])} />
+              <span>{day.status === null ? "No data" : STATUS_LABELS[day.status]}</span>
+              {day.uptime !== null ? (
+                <span className="ml-auto text-muted-foreground">{formatUptime(day.uptime)}</span>
+              ) : null}
+            </div>
+            {day.status === null ? (
+              <div className="mt-1 text-[11px] text-muted-foreground">Not monitored on this day.</div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      <div className="mt-1 flex justify-between text-[11px] text-muted-foreground">
+        <span>
+          <span className="sm:hidden">{Math.min(history.length, MOBILE_DAYS)} days ago</span>
+          <span className="hidden sm:inline">{history.length} days ago</span>
+        </span>
+        <span>{uptime === null ? "No data yet" : formatUptime(uptime)}</span>
+        <span>Today</span>
       </div>
     </div>
   );

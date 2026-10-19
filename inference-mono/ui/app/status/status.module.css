@@ -1,14 +1,26 @@
-/* GitHub Status-inspired graph colors, scoped to the uptime SVG so badges
-   and the rest of the app retain the shared semantic palette. */
-.uptimeBar {
-  --success: 133.85 62.40% 50.98%; /* #34d058 */
-  --warning: 42.22 74.31% 57.25%; /* #e3b341 */
-  --destructive: 2.74 92.59% 62.94%; /* #f85149 */
+/* HYP-58 uptime bar colors (GitHub Status-inspired): green = operational,
+   yellow = degraded, red = down, neutral = no data. Scoped to the bars and
+   their tooltip swatches so badges keep the shared semantic palette. */
+.barOperational {
+  background-color: #34d058;
+}
+.barDegraded {
+  background-color: #e3b341;
+}
+.barDown {
+  background-color: #f85149;
+}
+.barNone {
+  background-color: hsl(var(--border));
 }
 
-/* Match githubstatus.com on light surfaces; use brighter tones above for dark. */
-:global(:root.light) .uptimeBar {
-  --success: 133.70 61.35% 40.59%; /* #28a745 */
-  --warning: 46.29 92.11% 44.71%; /* #dbab09 */
-  --destructive: 354.25 70.46% 53.53%; /* #dc3545 */
+/* Match githubstatus.com on light surfaces; the brighter tones above are for dark. */
+:global(:root.light) .barOperational {
+  background-color: #28a745;
+}
+:global(:root.light) .barDegraded {
+  background-color: #dbab09;
+}
+:global(:root.light) .barDown {
+  background-color: #dc3545;
 }
