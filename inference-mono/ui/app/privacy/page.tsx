@@ -209,8 +209,8 @@ export default function PrivacyPage() {
                 ],
                 [
                   "Is my data encrypted on the way to the enclave?",
-                  "In transit, yes. End to end, no",
-                  "TLS from your device to our edge network, which passes it to our servers over an encrypted tunnel; then a second, certificate-pinned TLS session from the Talaris API to the attested enclave. Our edge and the API handle plaintext in memory to authenticate, meter and route your request, so this is hop-by-hop, not a single device-to-enclave session (section 7)."
+                  "End to end if you opt in; otherwise in transit",
+                  "API requests sent through the talaris-e2ee client are encrypted on your device to a key held only inside an enclave whose attestation your client verified itself; the Talaris API routes and bills ciphertext it cannot read. Plain API requests and the chat app are encrypted hop by hop: TLS to our edge, an encrypted tunnel to our servers, then certificate-pinned TLS from the API to the enclave, with the edge and API handling plaintext in memory to route your request (section 7)."
                 ],
                 [
                   "Do you store prompts and responses?",
@@ -360,7 +360,21 @@ export default function PrivacyPage() {
           <Section id="encryption" n={7} title="What is (and is not) end-to-end">
             <EncryptionBoundaryDiagram />
             <p>
-              Your connection to Talaris is protected by TLS in transit to our edge network
+              <strong>End-to-end encrypted API requests (opt-in).</strong> With the talaris-e2ee
+              client library, your device encrypts the whole request (messages, parameters, tools)
+              to a public key generated inside one enclave, using hybrid post-quantum HPKE
+              (ML-KEM-768 + X25519). Before encrypting, the client fetches that enclave&apos;s
+              attestation with its own fresh nonce and verifies it itself: genuine TDX and GPU
+              evidence, and that the key is bound into the attested identity. It does not take our
+              word for the key. The enclave encrypts the response back to a key only your device
+              holds; streamed responses are sequenced and closed with an authenticated final event,
+              so a relay cannot drop, reorder or forge output. On this path the Talaris API sees
+              only what it needs to route and bill: your API key, the model, whether you are
+              streaming, your max_tokens, message sizes, timing and token counts. Never the content.
+            </p>
+            <p>
+              <strong>Everything else is hop by hop.</strong> Plain API requests and the chat app
+              work as follows. Your connection to Talaris is protected by TLS in transit to our edge network
               (Cloudflare), which decrypts it and passes it to our servers over an encrypted tunnel;
               the platform&apos;s connection to the enclave is a second, separate,
               certificate-pinned TLS session. The edge and the Talaris API both see your request in

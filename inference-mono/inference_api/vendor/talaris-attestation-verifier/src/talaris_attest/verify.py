@@ -19,6 +19,7 @@ from .claims import ExpectedClaims
 from .docview import DocView
 from .errors import MalformedDocument, UnsupportedReportDataVersion
 from .gpu import hash_gpu_uuids
+from .identity import bundle_e2ee_key, recompute_fingerprint
 from .report_data import REPORT_DATA_DOMAIN_TAG, REPORT_DATA_FIELDS, recompute
 from .result import CheckResult, VerificationResult
 from .tls import verify_tls_pin
@@ -69,6 +70,9 @@ def verify_attestation(
     # === Step 3: recompute report_data =================================
     recomputed_ok = _check_report_data(view, result)
 
+    # === Step 3b: public_bundle -> fingerprint ===========================
+    _check_identity_binding(view, result)
+
     # The remaining hardware/cross-checks bind to report_data; if we could not recompute
     # it we still run them against the document's claimed report_data, but a failed step 3
     # already makes the result not-ok.
@@ -93,8 +97,12 @@ def verify_attestation(
         result.measured_gpu_uuids = measured_uuids
 
     # === Step 5: Intel TDX quote =======================================
+    verified_measurements: Optional[dict] = None
     if expected.require_tdx_quote:
-        _check_tdx_quote(view, tdx_backend, report_data_bytes, result)
+        verified_measurements = _check_tdx_quote(view, tdx_backend, report_data_bytes, result)
+
+    # === Step 5b: enclave software measurement pin ======================
+    _check_measurement_pin(expected, tdx_backend, verified_measurements, result)
 
     # === Step 6: gpu_uuids <-> gpu_hash cross-check ====================
     _check_gpu_hash(view, measured_uuids, expected, result)
@@ -214,6 +222,34 @@ def _check_report_data(view: DocView, result: VerificationResult) -> bool:
     return False
 
 
+def _check_identity_binding(view: DocView, result: VerificationResult) -> None:
+    """The keys in public_bundle must hash to the fingerprint report_data binds.
+
+    Without this a relay could keep a genuine report_data and substitute its own
+    sealing key (and capture provisioned credentials) or E2EE key (and read prompts).
+    """
+    try:
+        recomputed = recompute_fingerprint(view)
+        claimed = view.identity_fpr
+        e2ee = bundle_e2ee_key(view)
+    except MalformedDocument as exc:
+        result.add(CheckResult("identity_binding", False, f"public_bundle unusable: {exc}"))
+        return
+    if recomputed != claimed:
+        result.add(CheckResult(
+            "identity_binding", False,
+            "public_bundle keys do not hash to the attested fingerprint (key substitution)",
+            detail={"recomputed": recomputed, "claimed": claimed},
+        ))
+        return
+    result.e2ee_key_hex = e2ee.hex() if e2ee is not None else None
+    result.add(CheckResult(
+        "identity_binding", True,
+        "public_bundle keys hash to the attested fingerprint"
+        + (" (incl. E2EE key)" if e2ee is not None else ""),
+    ))
+
+
 def _check_backend_gate(
     expected: ExpectedClaims,
     gpu_backend,
@@ -311,7 +347,8 @@ def _check_tdx_quote(
     tdx_backend,
     report_data_bytes: bytes,
     result: VerificationResult,
-) -> None:
+) -> Optional[dict]:
+    """Run the TDX backend. Returns the measurements ONLY when the quote verified."""
     evidence = view.evidence
     # The producer stores the quote under evidence["tdx_quote"] (dict or None).
     quote = evidence.get("tdx_quote")
@@ -322,18 +359,79 @@ def _check_tdx_quote(
             "tdx_quote", False,
             f"TDX backend raised: {type(exc).__name__}: {exc}",
         ))
-        return
+        return None
     if backend_result.verified:
         result.add(CheckResult(
             "tdx_quote", True,
             backend_result.reason or "TDX quote verified and report_data echoed",
             detail={"measurements": backend_result.measurements},
         ))
-    else:
+        return backend_result.measurements
+    result.add(CheckResult(
+        "tdx_quote", False,
+        backend_result.reason or "TDX quote verification failed",
+    ))
+    return None
+
+
+def _check_measurement_pin(
+    expected: ExpectedClaims,
+    tdx_backend,
+    verified_measurements: Optional[dict],
+    result: VerificationResult,
+) -> None:
+    """Compare the TDX-VERIFIED software measurements to the published-build allowlist.
+
+    Only measurements returned by a backend that VERIFIED the quote are trusted, and
+    only from a secure (hardware) backend: a stub backend's measurements are whatever
+    the document claims, so under a configured pin they never satisfy it.
+    """
+    allowlist = expected.tdx_measurement_allowlist
+    if not allowlist:
+        if expected.require_measurement_pin:
+            result.add(CheckResult(
+                "measurement_pin", False,
+                "require_measurement_pin is set but no TDX measurement allowlist is "
+                "configured (fail closed: refusing to accept unpinned enclave software)",
+            ))
+        else:
+            result.add(CheckResult(
+                "measurement_pin", True,
+                "no TDX measurement allowlist configured — enclave software is NOT "
+                "pinned (any software in a genuine TD on genuine hardware passes)",
+                required=False,
+            ))
+        return
+    if verified_measurements is None:
         result.add(CheckResult(
-            "tdx_quote", False,
-            backend_result.reason or "TDX quote verification failed",
+            "measurement_pin", False,
+            "TDX measurement allowlist configured but no verified TDX measurements are "
+            "available (quote missing, unverified, or require_tdx_quote disabled)",
         ))
+        return
+    if getattr(tdx_backend, "is_secure", False) is not True:
+        result.add(CheckResult(
+            "measurement_pin", False,
+            "TDX measurement allowlist configured but the TDX backend is not a "
+            "hardware-verifying backend; its measurements cannot satisfy a pin",
+        ))
+        return
+    for entry in allowlist:
+        if entry.matches(verified_measurements):
+            result.add(CheckResult(
+                "measurement_pin", True,
+                f"TDX measurements match published build {entry.label or entry.mrtd[:16]!r}",
+                detail={"mrtd": verified_measurements.get("mrtd")},
+            ))
+            return
+    result.add(CheckResult(
+        "measurement_pin", False,
+        "TDX measurements (MRTD/RTMRs) match no published enclave build in the allowlist",
+        detail={
+            k: verified_measurements.get(k)
+            for k in ("mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3")
+        },
+    ))
 
 
 def _check_gpu_hash(

@@ -60,6 +60,16 @@ client = build_pinned_client(result, base_url=url, bearer=token)  # leaf cert pi
    the signing chain **and** that the evidence nonce == `doc.report_data`.
 5. **TDX quote** — dispatch `evidence.tdx_quote` to the Intel backend; verify the
    PCS/DCAP chain **and** that the quote's `report_data[:64]` echoes `doc.report_data`.
+5b. **measurement pin** (`measurement_pin`) — when `tdx_measurement_allowlist` is set
+   (`TdxMeasurementEntry(mrtd=..., rtmr0..rtmr3=..., label=...)`, or
+   `load_measurement_allowlist(json_or_@file)`), the **hardware-verified** TDX
+   measurements must match a published build; a missing/unverified quote or a stub backend
+   fails closed. Unset: informational (and says the enclave software is NOT pinned), unless
+   `require_measurement_pin=True`, which then fails. Without a pin, any software in a
+   genuine TD passes. Note that MRTD/RTMR0-2 measure the TD boot chain, so they bind the
+   enclave's code only when it ships as a measured CVM image (not a container started
+   later inside the TD). Configure through `IntelPolicy(allowed_measurements=...,
+   require_measurement_pin=...)`.
 6. **gpu_hash cross-check** — `hash_gpu_uuids(doc.gpu_uuids) == doc.gpu_hash` **and**
    `set(doc.gpu_uuids)` ⊆ NVIDIA-attested UUIDs. Skipped (informational) when `gpu_hash`
    is `None` (engine not ready).

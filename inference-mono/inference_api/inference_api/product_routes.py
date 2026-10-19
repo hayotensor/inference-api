@@ -696,14 +696,23 @@ async def _routed_stream_response(
 
     stream = None
     last_error: Exception | None = None
-    for candidate in candidates[: settings.forward_max_attempts]:
-        try:
-            stream = await forwarder.forward_stream(candidate, chat_payload, request_id=request_id)
-            break
-        except ForwardError as exc:
-            last_error = exc
-            await stats_recorder.record_failure(session, candidate, exc, request_id=request_id)
-            continue
+    try:
+        for candidate in candidates[: settings.forward_max_attempts]:
+            try:
+                stream = await forwarder.forward_stream(candidate, chat_payload, request_id=request_id)
+                break
+            except ForwardError as exc:
+                last_error = exc
+                await stats_recorder.record_failure(session, candidate, exc, request_id=request_id)
+                continue
+    except Exception:
+        # The reservation is already COMMITTED above, so anything that is not a
+        # ForwardError (which the loop absorbs) must release it here, or it leaks
+        # until its TTL. (A pinning.PinError used to escape exactly this way; the
+        # forwarder now maps it to NoPinError, and this guards whatever is next.)
+        await usage_service.release_inference_reservation(usage_event)
+        await session.commit()
+        raise
     if stream is None:
         await usage_service.release_inference_reservation(usage_event)
         # Commits the release AND the failed-attempt rows recorded above.

@@ -30,11 +30,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from talaris_attest import CertFingerprintMismatch
+from talaris_contracts.e2ee import parse_usage
 
+from inference_api.config import settings
 from inference_api.crypto import decrypt_token
 from inference_api.logging import request_id_ctx
 from inference_api.models import Miner, ProvisionedToken
-from inference_api.routing.pinning import build_enclave_client
+from inference_api.routing.pinning import PinError, build_enclave_client
 from inference_api.routing.selector import MinerCandidate
 from inference_api.security import utcnow
 
@@ -49,6 +51,9 @@ OUTCOME_HTTP_ERROR = "http_error"
 OUTCOME_TIMEOUT = "timeout"
 OUTCOME_PIN_MISMATCH = "pin_mismatch"
 OUTCOME_NO_TOKEN = "no_token"
+# A pinned client could not even be built (pinning enforced, no attested
+# fingerprint on record). Distinct from pin_mismatch: nothing was dialed.
+OUTCOME_NO_PIN = "no_pin"
 
 
 def _elapsed_ms(started: float) -> int:
@@ -95,6 +100,18 @@ class NoActiveTokenError(ForwardError):
     """The selected miner has no active provisioned token to forward with."""
 
     outcome = OUTCOME_NO_TOKEN
+
+
+class NoPinError(ForwardError):
+    """A pinned enclave client could not be built (``pinning.PinError``).
+
+    Surfaced as a ``ForwardError`` so every caller's ``except ForwardError``
+    (failover, reservation release) handles it. Before this, a raw ``PinError``
+    escaped the streaming path after its reservation was committed, leaking the
+    reservation until its TTL.
+    """
+
+    outcome = OUTCOME_NO_PIN
 
 
 @dataclass
@@ -227,13 +244,23 @@ class TEEForwarder:
             self.session.add(miner)
             await self.session.flush()
 
-    def _client(self, candidate: MinerCandidate, bearer: str) -> httpx.AsyncClient:
-        return build_enclave_client(
-            base_url=candidate.tee_endpoint,
-            tls_cert_fingerprint=candidate.tls_cert_fingerprint,
-            bearer=bearer,
-            transport=self._transport,
-        )
+    def _client(
+        self,
+        candidate: MinerCandidate,
+        bearer: str | None,
+        *,
+        timeout: float | httpx.Timeout | None = None,
+    ) -> httpx.AsyncClient:
+        try:
+            return build_enclave_client(
+                base_url=candidate.tee_endpoint,
+                tls_cert_fingerprint=candidate.tls_cert_fingerprint,
+                bearer=bearer,
+                transport=self._transport,
+                timeout=timeout,
+            )
+        except PinError as exc:
+            raise NoPinError(str(exc), latency_ms=0) from exc
 
     def _headers(self, bearer: str, request_id: str | None) -> dict[str, str]:
         """Auth + request-id headers for an enclave call.
@@ -361,3 +388,249 @@ class TEEForwarder:
             latency_ms=_elapsed_ms(started),
             _started=started,
         )
+
+    # ------------------------------------------------------------------ #
+    # talaris-e2ee/v1 relay. The platform only ever moves ciphertext here; the
+    # same token lookup, pinned client and pin-mismatch classification as the
+    # plaintext path are reused so the E2EE path cannot weaken either.
+    #
+    # These helpers never touch ``self.session`` after ``active_bearer`` so the
+    # instance listing can dial several enclaves concurrently; callers apply
+    # ``mark_stale`` for an ``OUTCOME_PIN_MISMATCH`` error afterwards.
+    # ------------------------------------------------------------------ #
+
+    async def active_bearer(self, candidate: MinerCandidate) -> str:
+        """The decrypted inference token for ``candidate`` (``NoActiveTokenError``)."""
+        _row, bearer = await self._active_token(candidate.miner_id, candidate.model_id)
+        return bearer
+
+    async def mark_stale(self, miner_id) -> None:
+        """Mark a miner ``stale`` exactly as a TLS pin mismatch does."""
+        await self._mark_stale(miner_id)
+
+    async def _open(
+        self,
+        candidate: MinerCandidate,
+        method: str,
+        path: str,
+        *,
+        bearer: str | None,
+        request_id: str | None = None,
+        timeout: float | httpx.Timeout | None = None,
+        **kwargs,
+    ) -> "EnclaveExchange":
+        """Send one request over the (pinned) enclave client, response NOT read.
+
+        Transport/pin failures raise ``ForwardError`` (pin mismatch carries
+        ``OUTCOME_PIN_MISMATCH``; the caller marks the miner stale). Any HTTP
+        status is returned to the caller, which owns closing the exchange.
+        """
+        started = time.perf_counter()
+        client = self._client(candidate, bearer, timeout=timeout)
+        headers = {**kwargs.pop("headers", {})}
+        if bearer:
+            headers.update(self._headers(bearer, request_id))
+        request = client.build_request(method, path, headers=headers, **kwargs)
+        try:
+            response = await client.send(request, stream=True)
+        except CertFingerprintMismatch as exc:
+            await client.aclose()
+            raise ForwardError(
+                f"TLS pin mismatch: {exc}",
+                outcome=OUTCOME_PIN_MISMATCH,
+                latency_ms=_elapsed_ms(started),
+            ) from exc
+        except httpx.HTTPError as exc:
+            await client.aclose()
+            raise ForwardError(
+                f"forward transport error: {exc}",
+                outcome=_transport_outcome(exc),
+                latency_ms=_elapsed_ms(started),
+            ) from exc
+        return EnclaveExchange(
+            candidate=candidate,
+            response=response,
+            client=client,
+            latency_ms=_elapsed_ms(started),
+            _started=started,
+        )
+
+    async def _read_json(self, exchange: "EnclaveExchange") -> dict:
+        try:
+            if exchange.response.status_code != 200:
+                raise ForwardError(
+                    f"enclave returned {exchange.response.status_code}",
+                    outcome=OUTCOME_HTTP_ERROR,
+                    latency_ms=_elapsed_ms(exchange._started),
+                    http_status=exchange.response.status_code,
+                )
+            try:
+                await exchange.response.aread()
+                body = exchange.response.json()
+            except httpx.HTTPError as exc:
+                raise ForwardError(
+                    f"forward transport error: {exc}",
+                    outcome=_transport_outcome(exc),
+                    latency_ms=_elapsed_ms(exchange._started),
+                ) from exc
+            except ValueError as exc:
+                raise ForwardError(
+                    "enclave returned a non-JSON body",
+                    outcome=OUTCOME_HTTP_ERROR,
+                    latency_ms=_elapsed_ms(exchange._started),
+                    http_status=exchange.response.status_code,
+                ) from exc
+            if not isinstance(body, dict):
+                raise ForwardError(
+                    "enclave returned a non-object JSON body",
+                    outcome=OUTCOME_HTTP_ERROR,
+                    latency_ms=_elapsed_ms(exchange._started),
+                    http_status=exchange.response.status_code,
+                )
+            return body
+        finally:
+            await exchange.aclose()
+
+    async def e2ee_nonces(
+        self, candidate: MinerCandidate, bearer: str, count: int, *, timeout: float | None = None
+    ) -> dict:
+        """``POST /e2e/nonces`` -> the enclave's JSON (nonces, expires_in, e2ee_key, key_id)."""
+        exchange = await self._open(
+            candidate, "POST", "/e2e/nonces", bearer=bearer, json={"count": count}, timeout=timeout
+        )
+        return await self._read_json(exchange)
+
+    async def e2ee_attestation(self, candidate: MinerCandidate, nonce_hex: str) -> bytes:
+        """``GET /attestation?nonce=`` -> the raw JSON bytes, verbatim (the client verifies)."""
+        exchange = await self._open(
+            candidate,
+            "GET",
+            "/attestation",
+            bearer=None,
+            params={"nonce": nonce_hex},
+            timeout=httpx.Timeout(
+                settings.tee_attestation_timeout_seconds,
+                connect=settings.tee_connect_timeout_seconds,
+            ),
+        )
+        try:
+            if exchange.response.status_code != 200:
+                raise ForwardError(
+                    f"enclave returned {exchange.response.status_code}",
+                    outcome=OUTCOME_HTTP_ERROR,
+                    latency_ms=_elapsed_ms(exchange._started),
+                    http_status=exchange.response.status_code,
+                )
+            try:
+                return await exchange.response.aread()
+            except httpx.HTTPError as exc:
+                raise ForwardError(
+                    f"forward transport error: {exc}",
+                    outcome=_transport_outcome(exc),
+                    latency_ms=_elapsed_ms(exchange._started),
+                ) from exc
+        finally:
+            await exchange.aclose()
+
+    async def e2ee_invoke(
+        self,
+        candidate: MinerCandidate,
+        bearer: str,
+        body: bytes,
+        headers: dict[str, str],
+        *,
+        request_id: str | None = None,
+    ) -> "EnclaveExchange":
+        """``POST /e2e/invoke`` with the ciphertext; the response is NOT read.
+
+        No failover and no 401 retry: the ciphertext opens only on this enclave,
+        and re-sending it after the enclave consumed the nonce could only fail.
+        """
+        return await self._open(
+            candidate,
+            "POST",
+            "/e2e/invoke",
+            bearer=bearer,
+            request_id=request_id,
+            content=body,
+            headers={**headers, "Content-Type": "application/octet-stream"},
+        )
+
+
+@dataclass
+class EnclaveExchange(StreamForward):
+    """One open E2EE enclave response (status/headers known, body not yet read).
+
+    Subclasses ``StreamForward`` so ``stats_recorder.record_stream_success`` and the
+    timing fields apply unchanged; ``_accumulate`` is replaced with an SSE parser
+    for the talaris-e2ee/v1 stream shape:
+
+      * ``{"usage": {...}}``   the enclave's PLAINTEXT billing copy -> ``usage``;
+      * ``{"e2ee": ..}``       one sealed engine event -> ``content_chunks``, the
+                               HYP-56 disconnect-billing fallback.
+
+    Lines are buffered across network reads, so an event split between two TCP
+    segments is still parsed (the bytes relayed to the client are untouched).
+    """
+
+    usage_seen: bool = False
+    _buffer: bytes = b""
+
+    # An event line longer than this is not a usage event worth parsing; drop it
+    # rather than buffering an unbounded line from a misbehaving enclave.
+    _MAX_LINE = 1024 * 1024
+
+    def _accumulate(self, raw: bytes) -> None:
+        data = self._buffer + raw
+        lines = data.split(b"\n")
+        self._buffer = lines.pop()
+        if len(self._buffer) > self._MAX_LINE:
+            self._buffer = b""
+        for line in lines:
+            self._parse_line(line.strip())
+
+    def _parse_line(self, line: bytes) -> None:
+        if not line.startswith(b"data:"):
+            return
+        payload = line[len(b"data:"):].strip()
+        if not payload or payload == b"[DONE]":
+            return
+        if self.ttft_ms is None:
+            self.ttft_ms = _elapsed_ms(self._started)
+        if payload.startswith(b'{"e2ee":'):
+            # Hot path: a sealed chunk is opaque here; no need to JSON-parse it.
+            self.content_chunks += 1
+            return
+        try:
+            obj = json.loads(payload)
+        except (ValueError, UnicodeDecodeError):
+            return
+        if not isinstance(obj, dict):
+            return
+        if "e2ee" in obj:
+            self.content_chunks += 1
+        elif "usage" in obj and len(obj) == 1:
+            usage = usage_from_e2ee(obj["usage"])
+            if usage is not None:
+                self.usage = usage
+                self.usage_seen = True
+
+
+def usage_from_e2ee(value) -> Usage | None:
+    """Plaintext E2EE usage (header string or SSE dict) -> ``Usage``, strictly.
+
+    Delegates validation to ``talaris_contracts.e2ee.parse_usage`` (non-negative
+    ints only; anything else becomes None), so the billing parse is the one the
+    protocol defines rather than a second, laxer one.
+    """
+    if isinstance(value, dict):
+        value = json.dumps(value)
+    if not isinstance(value, str):
+        return None
+    parsed = parse_usage(value)
+    if parsed is None:
+        return None
+    prompt = parsed["prompt_tokens"] or 0
+    completion = parsed["completion_tokens"] or 0
+    total = parsed["total_tokens"] or (prompt + completion)
+    return Usage(prompt_tokens=prompt, completion_tokens=completion, total_tokens=total)

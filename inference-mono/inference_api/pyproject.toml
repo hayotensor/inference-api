@@ -14,6 +14,10 @@ dependencies = [
     "pydantic>=2.8.0",
     "pydantic-settings>=2.3.0",
     "httpx>=0.27.0",
+    # talaris_contracts.e2ee (the /v1/e2e/* relay) needs hybrid ML-KEM HPKE. The
+    # Dockerfile's `pip install .` runs before the vendored packages, so this pin is
+    # what guarantees the image gets it (vendor/talaris-contracts keeps it optional).
+    "cryptography>=49",
 ]
 
 [project.optional-dependencies]

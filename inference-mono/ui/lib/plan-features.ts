@@ -11,8 +11,9 @@ type TierCopy = { inherits: string | null; adds: string[] };
 export const PLAN_TIER_COPY: Record<string, TierCopy> = {
   free: {
     inherits: null,
-    // Keep these in step with /privacy (HYP-80/81). Deliberately NOT "E2EE"
-    // (the API decrypts to route; encryption is hop-by-hop) and NOT
+    // Keep these in step with /privacy (HYP-80/81/97). E2EE is claimed only for
+    // API requests made through the talaris-e2ee client (the plain API and the
+    // chat app are still hop-by-hop: the API decrypts to route). NOT
     // "per-request attestation" (hardware attestation is ~hourly; each request
     // gets a TLS pin check + signed receipt). "Zero data retention" covers the
     // API path only: the chat app can store history if the user opts in.
@@ -20,7 +21,8 @@ export const PLAN_TIER_COPY: Record<string, TierCopy> = {
       "OpenAI-compatible API",
       "Zero data retention: the API never stores prompts or outputs",
       "Every request served by an attested TEE, with a signed receipt",
-      "Encrypted in transit, TLS-pinned to the enclave",
+      "Optional end-to-end encrypted API requests (talaris-e2ee client)",
+      "Otherwise encrypted in transit, TLS-pinned to the enclave",
       "Community support"
     ]
   },

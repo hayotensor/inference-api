@@ -24,7 +24,7 @@ from typing import Optional
 
 from .backends.intel_pcs import IntelPcsTdxBackend
 from .backends.nvidia_nras import NvidiaNrasBackend
-from .claims import ExpectedClaims, ModelAllowlistEntry
+from .claims import ExpectedClaims, ModelAllowlistEntry, TdxMeasurementEntry
 
 __all__ = ["NvidiaPolicy", "IntelPolicy", "build_expected_claims"]
 
@@ -47,12 +47,23 @@ class IntelPolicy:
     ``trusted_root_pem=None`` keeps the bundled real Intel SGX Root CA pin; ``pcs_base`` /
     ``allowed_tcb_statuses=None`` keep the backend defaults. ``require_collateral`` defaults
     True (production-safe).
+
+    Enclave SOFTWARE pin (opt-in, see ``TdxMeasurementEntry``):
+      * ``allowed_measurements`` — the published-build MRTD/RTMR allowlist. When set, a
+        document passes only if its hardware-verified TDX measurements match an entry.
+        Build it with ``talaris_attest.load_measurement_allowlist`` from config.
+      * ``require_measurement_pin`` — when True, an UNCONFIGURED allowlist fails every
+        verification (so production cannot silently run unpinned). Default False only
+        so existing deployments keep working until a build's measurements are
+        published; set it True in production once they are.
     """
 
     trusted_root_pem: Optional[str] = None
     pcs_base: Optional[str] = None
     allowed_tcb_statuses: Optional[frozenset] = None
     require_collateral: bool = True
+    allowed_measurements: Optional[tuple[TdxMeasurementEntry, ...]] = None
+    require_measurement_pin: bool = False
 
 
 def build_expected_claims(
@@ -66,10 +77,16 @@ def build_expected_claims(
     require_tdx_quote: bool = True,
 ) -> ExpectedClaims:
     """Build the verification policy. See module docstring for the dev vs production split."""
+    pin_allowlist = tuple(intel.allowed_measurements) if intel and intel.allowed_measurements else None
+    pin_required = bool(intel.require_measurement_pin) if intel else False
+
     if allow_dev:
         # DEV/TEST: stub backends are auto-selected by verify_attestation under
-        # allow_insecure_dev; never permitted in production.
+        # allow_insecure_dev; never permitted in production. A measurement pin, if
+        # configured, still applies (and a stub TDX backend can never satisfy it).
         return ExpectedClaims(
+            tdx_measurement_allowlist=pin_allowlist,
+            require_measurement_pin=pin_required,
             required_modes=frozenset({"dev"}),
             allow_insecure_dev=True,
             expected_miner_hash=expected_miner_hash,
@@ -110,6 +127,8 @@ def build_expected_claims(
         model_allowlist=model_allowlist,
         nvidia_backend=nvidia_backend,
         tdx_backend=intel_backend,
+        tdx_measurement_allowlist=pin_allowlist,
+        require_measurement_pin=pin_required,
         require_gpu_evidence=require_gpu_evidence,
         require_tdx_quote=require_tdx_quote,
     )

@@ -44,6 +44,7 @@ from .miner_stats import (
     MinerStatsEntry,
     canonical_miner_stats_message,
 )
+from .identity import ed25519_peer_id, ed25519_pubkey_from_peer_id
 from .provision import Credentials, ProvisionRequest
 from .registration import (
     REGISTRATION_DOMAIN_TAG,
@@ -106,6 +107,9 @@ __all__ = [
     "verify_registration_signature",
     "sign_registration_ed25519",
     "registration_miner_hash",
+    # identity mapping (platform key <-> libp2p peer id <-> chain node)
+    "ed25519_peer_id",
+    "ed25519_pubkey_from_peer_id",
     # usage
     "InferenceTokenUsage",
     "UsageReceipt",

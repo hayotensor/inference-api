@@ -394,6 +394,12 @@ class ProvisionerService:
         mm.attestation_expiry = expires_in(seconds=settings.attestation_ttl_seconds)
         mm.tls_cert_fingerprint = doc.tls_cert_fingerprint
         mm.enclave_verify_key = enclave_verify_key
+        # talaris-e2ee/v1: the verifier sets e2ee_key_hex only after its required
+        # identity_binding check proved public_bundle.e2ee_key hashes into the
+        # attested fingerprint. Overwritten on every (re-)attestation, so a key
+        # rotated on reboot is picked up and an enclave that stops advertising one
+        # (None) drops out of /v1/e2e/* instead of keeping a stale key.
+        mm.e2ee_public_key = result.e2ee_key_hex
         mm.model_hash = doc.model_hash or mm.model_hash
         # Usage rollback-detection snapshot (best-effort from the document).
         mm.usage_chain_head = doc.usage_chain_head or mm.usage_chain_head

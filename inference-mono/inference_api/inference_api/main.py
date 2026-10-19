@@ -15,6 +15,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from inference_api.allowlist_routes import router as allowlist_router
 from inference_api.attest_routes import router as attest_router
 from inference_api.config import settings
+from inference_api.e2ee_routes import E2EE_REQUEST_HEADERS, E2EE_RESPONSE_HEADERS
+from inference_api.e2ee_routes import router as e2ee_router
 from inference_api.logging import configure_logging, request_id_ctx
 from inference_api.maintenance.tasks import MaintenanceLoop
 from inference_api.miners.routes import router as miners_router
@@ -196,7 +198,11 @@ def create_app() -> FastAPI:
             "X-API-Key",
             "X-User-API-Key",
             settings.request_id_header,
+            # talaris-e2ee/v1 routing metadata (POST /v1/e2e/invoke).
+            *E2EE_REQUEST_HEADERS,
         ],
+        # A browser client must be able to read the E2EE response metadata.
+        expose_headers=[*E2EE_RESPONSE_HEADERS, settings.request_id_header],
     )
 
     @app.middleware("http")
@@ -241,6 +247,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(product_router)
+    app.include_router(e2ee_router)
     app.include_router(router_service_router)
     app.include_router(miners_router)
     app.include_router(allowlist_router)

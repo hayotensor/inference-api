@@ -70,6 +70,9 @@ class MinerCandidate:
     available_concurrent_requests: int
     queue_depth: int
     reputation: float
+    # talaris-e2ee/v1: the enclave's attested E2EE public key (hex), or None for a
+    # pre-E2EE enclave. Only ever set from the provisioner's verified result.
+    e2ee_public_key: str | None = None
 
     @property
     def sort_key(self) -> tuple:
@@ -155,8 +158,15 @@ class MinerSelector:
         self.session = session
         self._rng = rng or random.Random()
 
-    async def select(self, model_id: str) -> list[MinerCandidate]:
-        statement = (
+    def _eligible_statement(self):
+        """The ONE serving-eligibility predicate (plaintext and E2EE alike).
+
+        attested + loaded model-enclave on a healthy miner with an active
+        provisioned token for that model. ``select`` and ``select_instance`` both
+        build on this so an E2EE invoke can never reach an enclave the plaintext
+        path would refuse.
+        """
+        return (
             select(Miner, MinerModel)
             .join(MinerModel, MinerModel.miner_id == Miner.id)
             .join(
@@ -166,12 +176,33 @@ class MinerSelector:
                 & (ProvisionedToken.model_id == MinerModel.model_id),
             )
             .where(
-                MinerModel.model_id == model_id,
                 MinerModel.loaded.is_(True),
                 MinerModel.attestation_status == "attested",
                 Miner.health == HEALTHY,
             )
         )
+
+    async def select(self, model_id: str, *, e2ee_only: bool = False) -> list[MinerCandidate]:
+        """Ranked candidates for ``model_id``. ``e2ee_only`` additionally requires an
+        attested E2EE key (``MinerModel.e2ee_public_key``)."""
+        statement = self._eligible_statement().where(MinerModel.model_id == model_id)
+        if e2ee_only:
+            statement = statement.where(MinerModel.e2ee_public_key.is_not(None))
+        candidates = await self._candidates(statement)
+        # Shuffle first so ties (identical sort_key) break randomly (jitter), then
+        # stable-sort by the load ranking.
+        self._rng.shuffle(candidates)
+        candidates.sort(key=lambda c: c.sort_key)
+        return candidates
+
+    async def select_instance(self, miner_model_id) -> MinerCandidate | None:
+        """The candidate for ONE model-enclave (``MinerModel.id``) iff it is
+        currently eligible under exactly the predicate ``select`` uses."""
+        statement = self._eligible_statement().where(MinerModel.id == miner_model_id)
+        candidates = await self._candidates(statement)
+        return candidates[0] if candidates else None
+
+    async def _candidates(self, statement) -> list[MinerCandidate]:
         result = await self.session.execute(statement)
         rows = result.all()
         reputation_by_miner = await _platform_reputation(
@@ -212,10 +243,9 @@ class MinerSelector:
                         capacity, "queue_depth", 0, minimum=0, maximum=MAX_QUEUE_DEPTH
                     ),
                     reputation=reputation_by_miner.get(miner.id, _REPUTATION_NEUTRAL),
+                    # Deliberately NOT falling back to a Miner-level value: the key
+                    # belongs to exactly this model-enclave's attestation.
+                    e2ee_public_key=mm.e2ee_public_key,
                 )
             )
-        # Shuffle first so ties (identical sort_key) break randomly (jitter), then
-        # stable-sort by the load ranking.
-        self._rng.shuffle(candidates)
-        candidates.sort(key=lambda c: c.sort_key)
         return candidates

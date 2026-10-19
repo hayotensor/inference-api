@@ -47,10 +47,12 @@ MINER_STATS_KIND = "miner-stats/v1"
 class MinerStatsEntry(BaseModel):
     """One miner's finalized statistics for one model over one epoch.
 
-    Identity: ``hotkey`` is the on-chain subnet-node hotkey (the trust anchor that
-    ties these statistics to a chain node); ``subnet_node_id`` is carried so a
-    validator can score without a second chain lookup, but it MUST still be
-    cross-checked against the chain's own node list — never trusted blindly.
+    Identity: ``hotkey`` is the miner's PLATFORM identity — the 32-byte ed25519
+    registration key (hex), NOT the 20-byte EVM chain hotkey. Validators join it to a
+    chain node through the libp2p peer ID derived from it
+    (``talaris_contracts.ed25519_peer_id``), which the chain records for every node.
+    ``subnet_node_id`` is the platform's (self-asserted at registration) node id; it
+    is informational and MUST NOT be used as the join key.
 
     Counters:
     - ``requests_ok`` / ``requests_failed``: forward attempts the platform observed.

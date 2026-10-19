@@ -16,7 +16,13 @@ Public API:
 
 from __future__ import annotations
 
-from .claims import ExpectedClaims, FreshnessPolicy, ModelAllowlistEntry
+from .claims import (
+    ExpectedClaims,
+    FreshnessPolicy,
+    ModelAllowlistEntry,
+    TdxMeasurementEntry,
+    load_measurement_allowlist,
+)
 from .pinned_client import (
     CertFingerprintMismatch,
     build_pinned_async_client,
@@ -31,6 +37,8 @@ __all__ = [
     "verify_attestation",
     "ExpectedClaims",
     "ModelAllowlistEntry",
+    "TdxMeasurementEntry",
+    "load_measurement_allowlist",
     "FreshnessPolicy",
     "VerificationResult",
     "CheckResult",

@@ -13,8 +13,12 @@ follow the inference-subnet models so a payload can be cross-consumed.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
+import os
+import socket
 from typing import Any, Iterable
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -206,7 +210,7 @@ def _verify_signature(
 
 
 def verify_registration_signature(
-    reg: "SelfRegistration", *, key_type: str = "sr25519"
+    reg: "SelfRegistration", *, key_type: str = "ed25519"
 ) -> bool:
     """Verify ``reg.signature`` over the canonical message under ``reg.hotkey``.
 
@@ -269,6 +273,167 @@ def registration_miner_hash(reg: "SelfRegistration") -> str:
     return hashlib.sha256(bytes.fromhex(reg.hotkey)).hexdigest()
 
 
+# --------------------------------------------------------------------------- #
+# tee_endpoint SSRF guard.
+#
+# ``tee_endpoint`` (both ``SelfRegistration.tee_endpoint`` and the per-model
+# ``HostedModel.tee_endpoint``) is a URL the PLATFORM later dials verbatim
+# (inference-api's provisioner and forwarder). An unvalidated miner-supplied
+# URL is a classic SSRF primitive: a miner can point it at the cloud instance
+# metadata service (169.254.169.254), an internal admin panel, or any other
+# service reachable from the platform's network.
+#
+# This validator is intentionally NOT wired in as a pydantic field validator
+# on the models above: doing DNS resolution (see below) on every construction
+# of a ``SelfRegistration``/``HostedModel`` would run inside the MINER's own
+# process too (this module is shared with the signer), where "is this endpoint
+# safe for the platform to dial" is meaningless and where test/dev code
+# routinely builds these objects with placeholder hostnames. Instead,
+# inference-api calls ``validate_tee_endpoint`` explicitly at the two places
+# that matter: the ``/miners/register`` route (before the endpoint is ever
+# persisted) and the provisioner (right before it is dialed).
+# --------------------------------------------------------------------------- #
+
+
+class TeeEndpointError(ValueError):
+    """``tee_endpoint`` failed the SSRF-safety check (bad scheme, or resolves
+    into a disallowed address range)."""
+
+
+# One escape hatch, read directly from the process environment (NOT from any
+# ``.env`` file) so an operator can allow private/internal endpoints in a
+# deployment that legitimately needs them (production included) without
+# requiring a change to a read-only ``.env``: set
+# ``TALARIS_ALLOW_PRIVATE_TEE_ENDPOINTS=1`` (or "true"/"yes"/"on") in the
+# process environment. When set, it overrides BOTH buckets below uniformly.
+_ALLOW_PRIVATE_ENV_VAR = "TALARIS_ALLOW_PRIVATE_TEE_ENDPOINTS"
+
+_RFC1918_NETS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+]
+_IPV6_ULA_NET = ipaddress.ip_network("fc00::/7")  # unique-local, RFC1918-equivalent
+
+
+def _explicit_env_override() -> bool | None:
+    raw = os.environ.get(_ALLOW_PRIVATE_ENV_VAR)
+    if raw is None:
+        return None
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_rfc1918_or_ula(ip: "ipaddress.IPv4Address | ipaddress.IPv6Address") -> bool:
+    if isinstance(ip, ipaddress.IPv4Address):
+        return any(ip in net for net in _RFC1918_NETS)
+    return ip in _IPV6_ULA_NET
+
+
+def _resolve_candidates(host: str) -> list[str]:
+    """IP(s) to classify for ``host``, or ``[]`` if it can't be resolved now.
+
+    A literal IP is used directly (no I/O). A hostname is resolved via
+    ``socket.getaddrinfo`` (blocking; registration/provisioning are low-rate
+    paths so this is acceptable, but it is a DNS round-trip in each). A
+    hostname that fails to resolve returns ``[]`` (nothing to classify as
+    unsafe) rather than being rejected — this is deliberately lenient so
+    unresolvable placeholder hostnames (as used throughout the test suites)
+    are not blocked, and it is also the known blind spot: a hostname
+    resolving differently at request time than it did here — "DNS
+    rebinding" — is NOT caught by this function. Closing that gap fully
+    would require re-resolving and pinning the IP at actual connect time in
+    the HTTP transport, which this helper does not do.
+    """
+    try:
+        ipaddress.ip_address(host)
+        return [host]
+    except ValueError:
+        pass
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return []
+    seen: list[str] = []
+    for info in infos:
+        ip_str = info[4][0].split("%", 1)[0]  # strip IPv6 zone id, if any
+        if ip_str not in seen:
+            seen.append(ip_str)
+    return seen
+
+
+def validate_tee_endpoint(
+    endpoint: str,
+    *,
+    allow_private: bool | None = None,
+    app_env: str | None = None,
+) -> None:
+    """Raise ``TeeEndpointError`` unless ``endpoint`` is safe for the platform
+    to dial.
+
+    Always enforced (no opt-out): scheme must be ``http``/``https`` and a host
+    must be present.
+
+    Address-range policy, once the host is resolved to IP(s) (see
+    ``_resolve_candidates`` for the unresolvable-hostname / DNS-rebinding
+    caveat):
+
+    * link-local (169.254.0.0/16 and the IPv6 equivalent fe80::/10),
+      multicast, IETF-reserved, and unspecified (0.0.0.0 / ::) addresses are
+      REJECTED UNCONDITIONALLY, unless the explicit
+      ``TALARIS_ALLOW_PRIVATE_TEE_ENDPOINTS`` env var (or an explicit
+      ``allow_private=True``) opts in. There is no legitimate miner TEE at
+      the cloud metadata address or a multicast/reserved address, and this is
+      exactly the primitive used to reach it — ``app_env`` never relaxes this
+      bucket on its own.
+    * loopback (127.0.0.0/8, ::1) and RFC1918-style private ranges
+      (10/8, 172.16/12, 192.168/16, and the IPv6 fc00::/7 equivalent) are
+      rejected UNLESS ``allow_private`` (explicit, or the env override, or —
+      the fallback used when neither is given — ``app_env != "production"``)
+      allows them. This is the dev-stack carve-out: this stack legitimately
+      registers ``http://127.0.0.1:8801``, and defaulting private/loopback to
+      "allowed" outside production keeps that working without touching the
+      read-only ``.env``. Production defaults to rejecting them.
+
+    ``app_env`` is accepted as an explicit string (rather than this module
+    reading e.g. ``APP_ENV`` from the environment itself) because
+    inference-api's own ``app_env`` setting is sourced from pydantic-settings
+    (``.env`` file + process env merged), which this shared, process-agnostic
+    package has no business re-deriving independently.
+    """
+    parsed = urlparse(endpoint)
+    if parsed.scheme not in ("http", "https"):
+        raise TeeEndpointError(
+            f"tee_endpoint must use http or https, got scheme {parsed.scheme!r}"
+        )
+    host = parsed.hostname
+    if not host:
+        raise TeeEndpointError(f"tee_endpoint {endpoint!r} has no host")
+
+    override = _explicit_env_override()
+    if allow_private is None:
+        allow_private = override if override is not None else (app_env or "local") != "production"
+    allow_link_local = override if override is not None else False
+
+    for raw_ip in _resolve_candidates(host):
+        ip = ipaddress.ip_address(raw_ip)
+        if ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+            if allow_link_local:
+                continue
+            raise TeeEndpointError(
+                f"tee_endpoint {endpoint!r} resolves to disallowed address "
+                f"{raw_ip!r} (link-local/multicast/reserved/unspecified); set "
+                f"{_ALLOW_PRIVATE_ENV_VAR}=1 to explicitly allow this"
+            )
+        if ip.is_loopback or _is_rfc1918_or_ula(ip):
+            if allow_private:
+                continue
+            raise TeeEndpointError(
+                f"tee_endpoint {endpoint!r} resolves to a private/loopback address "
+                f"{raw_ip!r}; set {_ALLOW_PRIVATE_ENV_VAR}=1 (or run with "
+                "app_env != 'production') to explicitly allow this"
+            )
+
+
 __all__ = [
     "HostedModel",
     "TeeDescriptor",
@@ -280,4 +445,6 @@ __all__ = [
     "verify_registration_signature",
     "sign_registration_ed25519",
     "registration_miner_hash",
+    "TeeEndpointError",
+    "validate_tee_endpoint",
 ]

@@ -14,6 +14,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
+    Text,
     UniqueConstraint,
     Uuid,
     text,
@@ -99,6 +100,10 @@ class MinerModel(Base):
     tee_endpoint: Mapped[str | None] = mapped_column(String(512))
     tls_cert_fingerprint: Mapped[str | None] = mapped_column(String(128))
     enclave_verify_key: Mapped[str | None] = mapped_column(String(128))
+    # talaris-e2ee/v1: the enclave's attested E2EE public key (hex, 1216 bytes),
+    # stored only after verify_attestation's identity_binding check bound it to the
+    # attested fingerprint. NULL = pre-E2EE enclave (never offered on /v1/e2e/*).
+    e2ee_public_key: Mapped[str | None] = mapped_column(Text)
     attestation_status: Mapped[str] = mapped_column(String(16), default="pending", index=True, nullable=False)
     attestation_mode: Mapped[str | None] = mapped_column(String(32))
     attestation_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

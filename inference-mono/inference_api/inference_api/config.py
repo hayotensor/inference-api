@@ -206,6 +206,15 @@ class Settings(BaseSettings):
     forward_max_attempts: int = Field(default=3, ge=1, le=10)
     tls_pin_enforce: bool = True
 
+    # talaris-e2ee/v1 relay (/v1/e2e/*) ------------------------------------- #
+    # Cap on the HPKE ciphertext body. The enclave caps the DECOMPRESSED request at
+    # 8 MiB, and the sealed payload is gzip of that plus a fixed HPKE overhead, so
+    # 16 MiB never rejects a request the enclave would accept.
+    e2ee_max_body_bytes: int = Field(default=16 * 1024 * 1024, ge=4096, le=64 * 1024 * 1024)
+    # Concurrent enclave dials while collecting nonces for GET /v1/e2e/instances.
+    e2ee_nonce_fetch_concurrency: int = Field(default=4, ge=1, le=16)
+    e2ee_nonce_fetch_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+
     # Self-registration ---------------------------------------------------- #
     # ed25519 is the only scheme the shipped subnet node signs with (its libp2p key),
     # and the only one whose key maps to the libp2p peer ID the chain records.

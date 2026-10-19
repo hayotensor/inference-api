@@ -15,7 +15,7 @@ round-trip (parse -> model_dump) without being silently dropped.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,15 +29,23 @@ from .version import (
 class PublicBundle(BaseModel):
     """The enclave's published public keys.
 
-    Mirrors ``EnclaveIdentity.public_bundle()`` = {"verify_key", "sealing_key"}
-    (both hex). ``verify_key`` is the Ed25519 verify key; ``sealing_key`` is the
-    X25519 public key credentials are sealed to.
+    Mirrors ``EnclaveIdentity.public_bundle()`` = {"verify_key", "sealing_key",
+    "e2ee_key"} (all hex). ``verify_key`` is the Ed25519 verify key; ``sealing_key`` is
+    the X25519 public key credentials are sealed to; ``e2ee_key`` is the
+    MLKEM768-X25519 HPKE key clients encrypt E2EE requests to (absent on enclaves that
+    predate E2EE). The fingerprint is sha256 over all of them, in that order.
     """
 
     model_config = ConfigDict(extra="allow")
 
     verify_key: str
     sealing_key: str
+
+    # e2ee_key is carried via extra="allow" rather than declared, so a pre-E2EE
+    # document round-trips byte-identically (no injected ``"e2ee_key": None``).
+    @property
+    def e2ee_key(self) -> Optional[str]:
+        return (self.model_extra or {}).get("e2ee_key")
 
 
 class TdxMeasurements(BaseModel):

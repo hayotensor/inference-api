@@ -17,7 +17,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+# talaris_contracts.e2ee needs hybrid ML-KEM HPKE (cryptography >= 49). Kept optional
+# and out of the package __init__ so older environments still import everything else.
+e2ee = ["cryptography>=49"]
+dev = ["pytest", "cryptography>=49"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

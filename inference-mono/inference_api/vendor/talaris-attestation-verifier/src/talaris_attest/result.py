@@ -42,6 +42,9 @@ class VerificationResult:
     tls_cert_fingerprint: Optional[str] = None
     measured_gpu_uuids: tuple[str, ...] = ()
     report_data_hex: Optional[str] = None
+    # Hex MLKEM768-X25519 HPKE public key, set only once identity_binding proved it is
+    # covered by the attested fingerprint. None for enclaves without E2EE.
+    e2ee_key_hex: Optional[str] = None
 
     def add(self, check: CheckResult) -> CheckResult:
         self.checks.append(check)
