@@ -71,7 +71,7 @@ function Travel({ x, y, dx, delay = 0, dur = 3.2 }: { x: number; y: number; dx: 
 /** 1. Request path: who can read the plaintext at each hop. */
 export function RequestPathDiagram() {
   return (
-    <Frame label="Request path: your client sends over TLS to the Talaris API, which forwards over a certificate-pinned TLS connection through a miner ingress that only relays ciphertext, into the enclave. Client, API and enclave can read the prompt; the ingress cannot.">
+    <Frame label="Request path: your client sends over TLS, through our edge network, to the Talaris API, which forwards over a certificate-pinned TLS connection through a miner ingress that only relays ciphertext, into the enclave. Client, API and enclave can read the prompt; the ingress cannot.">
       <Box x={8} y={50} w={110} h={54} title="Your client" sub="app / SDK / chat" />
       <Box x={170} y={50} w={130} h={54} title="Talaris API" sub="auth, meter, route" />
       <Box x={352} y={50} w={110} h={54} title="Miner ingress" sub="SNI passthrough" dashed />
@@ -274,7 +274,7 @@ export function StorageDiagram() {
 export function CadenceDiagram() {
   const ticks = Array.from({ length: 13 }, (_, i) => 40 + i * 46);
   return (
-    <Frame label="Attestation cadence over a day. Enclave re-attestation by the platform roughly hourly by default. Validators challenge a sample of miners every subnet epoch. The browser badge re-checks the signed model list every six hours while open. Each response carries a signed receipt.">
+    <Frame label="Attestation cadence over a day. Enclave re-attestation by the platform roughly hourly by default. Validators challenge the miners every subnet epoch. The browser badge re-checks the signed model list every six hours while open. Each response carries a signed receipt.">
       <text x={8} y={22} className="pv-t pv-m">TIME -&gt; (about 12 hours shown)</text>
       <line x1={32} y1={42} x2={632} y2={42} />
       {ticks.map((x, i) => (

@@ -35,7 +35,7 @@ const SECTIONS: LegalSection[] = [
       "Account data you provide: email address, name, password (stored only as a salted hash), and wallet addresses you sign in with or link. Sign-in through Google gives us your verified email and name from Google.",
       "Usage and billing data: API request counts, token and credit consumption, selected models, plan and payment status (card details are handled by Stripe and never reach our servers), and referral attribution.",
       "Technical data: IP address, browser and device type, timestamps, and security logs used for abuse prevention and rate limiting. For the free guest sandbox we store a random per-browser identifier and your IP address to enforce daily limits.",
-      "Prompts and responses: inference requests are routed to independent, attested miners to produce a response. We meter and may log request metadata (size, model, timing). We do not use your prompts or outputs to train models. Conversation history in the chat application is stored for you so you can return to it, and you can delete it."
+      "Prompts and responses: inference requests are routed to independent, attested miners to produce a response. We store request metadata (token counts, model, timing) but not the text of prompts or responses. We do not use your prompts or outputs to train models. Chat application history is saved on your device by default; if you choose account storage it is stored on our servers until you delete it. Files you upload to the chat application are stored on our servers."
     ]
   },
   {
@@ -209,13 +209,13 @@ export default function PrivacyPage() {
                 ],
                 [
                   "Is my data encrypted on the way to the enclave?",
-                  "Yes, on every hop",
-                  "TLS from your device to the Talaris API, then a second certificate-pinned TLS session from the API to the attested enclave. Past the API, plaintext exists only inside attested hardware. The API itself handles plaintext in memory to authenticate, meter and route your request, so this is hop-by-hop rather than a single device-to-enclave session (section 7)."
+                  "In transit, yes. End to end, no",
+                  "TLS from your device to our edge network, which passes it to our servers over an encrypted tunnel; then a second, certificate-pinned TLS session from the Talaris API to the attested enclave. Our edge and the API handle plaintext in memory to authenticate, meter and route your request, so this is hop-by-hop, not a single device-to-enclave session (section 7)."
                 ],
                 [
                   "Do you store prompts and responses?",
-                  "Not in the inference platform's database",
-                  "No table has a column for them. Metadata is stored (section 8). The chat app keeps history only where you choose (section 10)."
+                  "No",
+                  "The API, the chat app's key broker and the miner enclave hold prompt and response text only in memory while your request is being served. None of them has a database column, log line or receipt field for it; we keep only metadata such as token counts, model and timing, which billing needs (section 8). The chat app is separate: its history is saved on your device by default, and on our servers only if you switch a chat to account storage, where it stays until you delete it (section 10)."
                 ],
                 [
                   "Is every request served by an attested node?",
@@ -224,8 +224,8 @@ export default function PrivacyPage() {
                 ],
                 [
                   "Can the miner operator read my prompt?",
-                  "Designed not to",
-                  "That is what the hardware guarantees, not something this code can prove by itself (sections 3 and 11)."
+                  "No, not from outside the enclave",
+                  "Inference runs inside an Intel TDX confidential VM with an NVIDIA confidential-computing GPU, whose memory the host machine and its operator cannot read. Before a miner gets any traffic, its enclave must pass remote attestation: genuine TDX and GPU hardware, an approved model, and a TLS key generated inside the enclave, so your request is decrypted only in there. One gap remains: the platform does not yet pin the enclave's software measurement to a published build, so today it cannot prove the miner runs our unmodified enclave software (sections 3, 4 and 11)."
                 ]
               ]}
             />
@@ -235,7 +235,8 @@ export default function PrivacyPage() {
             <RequestPathDiagram />
             <p>
               An API call (<Code>POST /v1/chat/completions</Code> or <Code>/v1/inference</Code>) reaches
-              the Talaris API over TLS. The API authenticates your key (stored only as a hash), checks
+              our edge network over TLS, which hands it to the Talaris API through an encrypted
+              tunnel. The API authenticates your key (stored only as a hash), checks
               your model allowlist and rate limit, reserves token credit, and asks the miner selector
               for candidates: miners that are attested, healthy, have the model loaded and hold an
               active credential, ranked by free capacity, then queue depth, then a reputation the
@@ -304,8 +305,17 @@ export default function PrivacyPage() {
               signs its own claim.
             </p>
             <p>
+              What this does not yet cover: the TDX quote also carries the measurements of the
+              software booted inside the VM (<Code>MRTD</Code> and <Code>RTMR0</Code> to{" "}
+              <Code>RTMR3</Code>). The verifier parses them but does not yet compare them to the
+              published enclave build, so attestation proves genuine hardware, the model and an
+              in-enclave TLS key, but not that the enclave wrapper itself is unmodified. Pinning
+              these measurements is the next step.
+            </p>
+            <p>
               Validators on the subnet run their own, independent challenges: each epoch every
-              validator probes the same deterministic sample of miners with a fresh nonce, verifies the
+              validator probes every miner (or, if the subnet is configured to, the same
+              deterministic sample) with a fresh nonce, verifies the
               result with the same verifier, and uses it as a pass/fail gate on rewards.
             </p>
           </Section>
@@ -350,13 +360,15 @@ export default function PrivacyPage() {
           <Section id="encryption" n={7} title="What is (and is not) end-to-end">
             <EncryptionBoundaryDiagram />
             <p>
-              Your connection to Talaris is protected by TLS in transit, and the platform&apos;s
-              connection to the enclave is a second, separate, certificate-pinned TLS session. The
-              Talaris API decrypts your request to authenticate, meter and route it, and holds the
-              plaintext in memory while forwarding it. So encryption is hop-by-hop: it is{" "}
+              Your connection to Talaris is protected by TLS in transit to our edge network
+              (Cloudflare), which decrypts it and passes it to our servers over an encrypted tunnel;
+              the platform&apos;s connection to the enclave is a second, separate,
+              certificate-pinned TLS session. The edge and the Talaris API both see your request in
+              plaintext: the API decrypts it to authenticate, meter and route it, and holds it in
+              memory while forwarding it. So encryption is hop-by-hop: it is{" "}
               <strong>not</strong> a single end-to-end session between your device and the enclave.
-              What the design guarantees is that every hop is encrypted, that past the API
-              plaintext exists only inside attested hardware, and that the credential the platform
+              What the design guarantees is that every hop over the internet is encrypted, that
+              past the API plaintext exists only inside attested hardware, and that the credential the platform
               uses to reach the enclave is sealed so that only the enclave can open it.
             </p>
             <p>
@@ -396,7 +408,8 @@ export default function PrivacyPage() {
             />
             <p>
               Prompt and response text is held in memory to serve the request and is not written to
-              any of these tables. Server access logs are set to warnings only. Third-party
+              any of these tables. The serving plane&apos;s access logs are set to warnings only, and the
+              enclave&apos;s access log records method, path and status, never bodies. Third-party
               infrastructure in front of the service (such as a CDN or reverse proxy) is outside what
               this code controls; see the legal policy for the processors we use.
             </p>
@@ -408,7 +421,7 @@ export default function PrivacyPage() {
               {[
                 ["Every request", "TLS certificate pin check and a signed receipt. No new hardware quote."],
                 ["About every hour", "Full hardware attestation of each node (default 1 hour, operator-configurable)."],
-                ["Every subnet epoch", "Independent validator challenge of a sample of miners, with a fresh nonce."]
+                ["Every subnet epoch", "Independent validator challenge of the miners, with a fresh nonce."]
               ].map(([when, what]) => (
                 <div key={when} className="rounded-sm border border-border p-4">
                   <p className="eyebrow text-foreground">{when}</p>
@@ -432,7 +445,7 @@ export default function PrivacyPage() {
                 [
                   "Independent challenge of miners",
                   "Subnet validators",
-                  "Once per subnet epoch, on a deterministic sample of miners, with a fresh nonce."
+                  "Once per subnet epoch, with a fresh nonce; every miner by default, or a deterministic sample if configured."
                 ],
                 [
                   "TLS certificate pin",
@@ -464,15 +477,19 @@ export default function PrivacyPage() {
             <p>
               The chat app is a rebranded Open-WebUI. By default new conversations are kept in your
               browser&apos;s own storage and not on our servers. You can switch an account or a single
-              chat to account storage for multi-device access, and optionally encrypt chats with a
-              passphrase in the browser first; if you lose the passphrase those chats cannot be
-              recovered. The text of each message still passes through the Talaris API to reach a
+              chat to account storage for multi-device access; those chats are kept on our servers
+              under your account until you delete them (deletion removes them from the database),
+              and Talaris administrators can access them unless you encrypt them with a passphrase
+              in the browser first. If you lose the passphrase those chats cannot be recovered.
+              Files you upload into a chat are stored on our servers so the model can read them,
+              whichever storage you choose. The text of each message still passes through the Talaris API to reach a
               model, exactly as in section 2.
             </p>
             <p>
               Where web search is enabled, the search query is sent to a search provider
               (DuckDuckGo, with Bing or Wikipedia as fallbacks) by a small proxy we run. Treat search
-              terms as leaving the attested boundary. The signed-out sandbox is capped per day per
+              terms as leaving the attested boundary; the proxy also writes the query to its
+              server log. The signed-out sandbox is capped per day per
               browser and per network, and its requests are not billed to any account.
             </p>
           </Section>
@@ -484,6 +501,13 @@ export default function PrivacyPage() {
                 launch arguments. It is not a proof that the hardware has no flaw; TEEs have had
                 published side-channel and firmware vulnerabilities, and we depend on Intel and
                 NVIDIA for fixes.
+              </li>
+              <li>
+                The enclave&apos;s software measurements (TDX <Code>MRTD</Code>/<Code>RTMR</Code>)
+                are not yet checked against a published build (section 4). Until they are, the
+                guarantee that the operator cannot read your prompt rests on genuine attested
+                hardware plus the miner running our published enclave software, not on a
+                cryptographic proof of that software.
               </li>
               <li>
                 A model hash with no existing pin is added to the allowlist the first time it is
