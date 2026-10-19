@@ -28,3 +28,8 @@ env/
 # OS / editor
 .DS_Store
 *.swp
+
+# HYP-56: local env files carry live secrets; never track them.
+.env
+# Next.js build output (dev server dist dirs).
+inference-mono/ui/.next-*/
