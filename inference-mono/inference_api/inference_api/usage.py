@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from inference_api.billing_plans import seed_default_billing_plans
 from inference_api.config import settings
 from inference_api.errors import bad_request, payment_required
+from inference_api.key_limits import enforce_spend_limits
 from inference_api.logging import request_id_ctx
 from inference_api.models import (
     BillingPlan,
@@ -197,6 +198,15 @@ class UsageService:
                 wallet = await self._lock_or_create_wallet(user.id)
                 if wallet.balance_tokens < wallet_portion:
                     raise payment_required("Insufficient inference token balance")
+
+        # HYP-45: the key's own optional credit/USD caps. Checked here, with the
+        # user's period row locked above, so concurrent reservations serialize.
+        await enforce_spend_limits(
+            self.session,
+            api_key_id,
+            additional_credits=reserved_tokens,
+            additional_wallet_tokens=wallet_portion,
+        )
 
         event = InferenceUsageEvent(
             usage_period_id=locked_period.id,

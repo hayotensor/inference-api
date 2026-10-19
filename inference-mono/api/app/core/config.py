@@ -104,6 +104,13 @@ class Settings(BaseSettings):
     otp_ttl_seconds: int = 300
     otp_max_attempts: int = 5
     api_key_default_rate_limit_per_minute: int = 120
+    # HYP-45: rate used to express a key's pay-as-you-go wallet spend in USD for
+    # its ``usd_limit_cents`` cap. Defaults to the smallest wallet top-up's
+    # price ($10 / 1M credits, app/billing/plans.py) -- the highest per-credit
+    # rate any bundle charges, so the cap errs on the side of stopping early.
+    # MUST match inference_api's API_KEY_USD_CENTS_PER_MILLION_CREDITS, which
+    # is what actually enforces the cap.
+    api_key_usd_cents_per_million_credits: int = Field(default=1_000, ge=1)
     router_default_rate_limit_per_minute: int = Field(default=600, ge=1, le=60_000)
     router_reservation_ttl_seconds: int = Field(default=900, ge=60, le=86_400)
     router_max_input_tokens: int = Field(default=1_000_000, ge=1)

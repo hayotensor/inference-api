@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Uuid
+from sqlalchemy import JSON, BigInteger, DateTime, Enum, ForeignKey, Integer, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.security import generate_uuid, utcnow
@@ -19,6 +19,12 @@ if TYPE_CHECKING:
 class APIKeyEnvironment(enum.StrEnum):
     live = "live"
     test = "test"
+
+
+class APIKeyLimitPeriod(enum.StrEnum):
+    daily = "daily"
+    monthly = "monthly"
+    never = "never"
 
 
 class APIKey(Base):
@@ -43,6 +49,19 @@ class APIKey(Base):
     # Optional model allowlist. NULL/empty = unrestricted (reaches every model);
     # non-empty = the key may only be used against these model ids.
     allowed_models: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # Optional client IP allowlist (literal IPs and/or CIDRs). NULL/empty =
+    # usable from anywhere. Enforced on the serving plane against the
+    # trusted-proxy-resolved client IP (inference_api/client_ip.py).
+    allowed_ips: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # Optional spend caps (HYP-45). ``limit_period`` is one of
+    # ``APIKeyLimitPeriod`` ("daily"/"monthly" UTC windows, or "never" for a
+    # lifetime cap) and applies to both caps. ``credit_limit`` caps total
+    # credits (charged tokens) this key consumes from any funding source;
+    # ``usd_limit_cents`` caps the pay-as-you-go wallet spend (in USD cents).
+    # NULL cap = no cap of that kind.
+    limit_period: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    credit_limit: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    usd_limit_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     rate_limit_per_minute: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False

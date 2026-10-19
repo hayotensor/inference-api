@@ -61,6 +61,7 @@ export interface AuthSession {
 
 export type ApiKeyEnvironment = "test" | "live";
 export type ApiKeyScope = "models:read" | "inference:write" | "usage:read";
+export type ApiKeyLimitPeriod = "daily" | "monthly" | "never";
 
 export interface ApiKeyRead {
   id: UUID;
@@ -72,6 +73,12 @@ export interface ApiKeyRead {
   scopes: ApiKeyScope[];
   // null/empty = unrestricted (the key can reach every model).
   allowed_models: string[] | null;
+  // HYP-45: null/empty = usable from any IP. Literal IPs and/or CIDRs.
+  allowed_ips: string[] | null;
+  // HYP-45: spend caps. Both share limit_period; a null cap = no cap.
+  limit_period: ApiKeyLimitPeriod | null;
+  credit_limit: number | null;
+  usd_limit_cents: number | null;
   rate_limit_per_minute: number;
   created_at: string;
   expires_at: string | null;
@@ -81,6 +88,18 @@ export interface ApiKeyRead {
 
 export interface ApiKeyCreateResponse extends ApiKeyRead {
   key: string;
+}
+
+// Current-period spend against a key's caps (GET /api-keys/{id}/spend).
+export interface ApiKeySpend {
+  api_key_id: UUID;
+  limit_period: ApiKeyLimitPeriod | null;
+  period_start: string | null;
+  resets_at: string | null;
+  credits_used: number;
+  usd_cents_used: number;
+  credit_limit: number | null;
+  usd_limit_cents: number | null;
 }
 
 export type BillingInterval = "month" | "year";

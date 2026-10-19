@@ -4,7 +4,14 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api_keys.schemas import APIKeyCreate, APIKeyCreateResponse, APIKeyRead, APIKeyUpdate
+from app.api_keys.limits import key_spend_summary
+from app.api_keys.schemas import (
+    APIKeyCreate,
+    APIKeyCreateResponse,
+    APIKeyRead,
+    APIKeySpendRead,
+    APIKeyUpdate,
+)
 from app.api_keys.service import APIKeyService
 from app.audit.service import write_audit_log
 from app.auth.dependencies import current_active_user
@@ -84,6 +91,19 @@ async def get_api_key(
     return await APIKeyService(session).get_key(user, key_id)
 
 
+@router.get("/{key_id}/spend", response_model=APIKeySpendRead)
+@limiter.limit("60/minute")
+async def get_api_key_spend(
+    request: Request,
+    key_id: uuid.UUID,
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user),
+) -> APIKeySpendRead:
+    """Credits / USD this key has spent in its current limit period (HYP-45)."""
+    db_key = await APIKeyService(session).get_key(user, key_id)
+    return APIKeySpendRead(**await key_spend_summary(session, db_key))
+
+
 @router.patch("/{key_id}", response_model=APIKeyRead)
 @limiter.limit("30/minute")
 async def update_api_key(
@@ -99,7 +119,10 @@ async def update_api_key(
         "api_key.update",
         user_id=user.id,
         request=request,
-        metadata={"api_key_id": str(db_key.id)},
+        metadata={
+            "api_key_id": str(db_key.id),
+            "fields": sorted(payload.model_dump(exclude_unset=True)),
+        },
     )
     await session.commit()
     return db_key

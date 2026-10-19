@@ -1,10 +1,11 @@
+import ipaddress
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.security import is_past
-from app.db.models.api_key import APIKeyEnvironment
+from app.db.models.api_key import APIKeyEnvironment, APIKeyLimitPeriod
 
 ALLOWED_API_KEY_SCOPES = frozenset({"models:read", "inference:write", "usage:read"})
 DEFAULT_SCOPES = sorted(ALLOWED_API_KEY_SCOPES)
@@ -48,6 +49,50 @@ def validate_allowed_models(value: list[str] | None) -> list[str] | None:
     return cleaned or None
 
 
+MAX_ALLOWED_IPS = 50
+
+
+def validate_allowed_ips(value: list[str] | None) -> list[str] | None:
+    """Normalize an optional client IP allowlist (HYP-45).
+
+    Same opt-in shape as ``allowed_models``: ``None``/empty = usable from any
+    IP. Each entry is a literal IPv4/IPv6 address or a CIDR network; entries
+    are canonicalized (``10.0.0.7/8`` -> ``10.0.0.0/8``, IPv6 compressed) and
+    de-duplicated so the serving plane only ever sees well-formed values.
+    """
+    if not value:
+        return None
+    if len(value) > MAX_ALLOWED_IPS:
+        raise ValueError(f"allowed_ips may contain at most {MAX_ALLOWED_IPS} entries")
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in value:
+        entry = raw.strip()
+        if not entry:
+            raise ValueError("allowed_ips entries must be non-empty strings")
+        try:
+            if "/" in entry:
+                normalized = str(ipaddress.ip_network(entry, strict=False))
+            else:
+                normalized = str(ipaddress.ip_address(entry))
+        except ValueError:
+            raise ValueError(f"{entry!r} is not a valid IP address or CIDR range") from None
+        if normalized not in seen:
+            seen.add(normalized)
+            cleaned.append(normalized)
+    return cleaned or None
+
+
+def validate_spend_limits(
+    limit_period: APIKeyLimitPeriod | str | None,
+    credit_limit: int | None,
+    usd_limit_cents: int | None,
+) -> None:
+    """A credit or USD cap is meaningless without the window it applies to."""
+    if (credit_limit is not None or usd_limit_cents is not None) and limit_period is None:
+        raise ValueError("limit_period is required when credit_limit or usd_limit_cents is set")
+
+
 class APIKeyCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     environment: APIKeyEnvironment = APIKeyEnvironment.test
@@ -57,6 +102,12 @@ class APIKeyCreate(BaseModel):
     # Optional: restrict this key to a specific set of model ids. Unset/empty
     # means unrestricted -- the key can reach every model, same as today.
     allowed_models: list[str] | None = None
+    # Optional: restrict this key to client IPs/CIDRs. Unset/empty = any IP.
+    allowed_ips: list[str] | None = None
+    # Optional spend caps (HYP-45); both share ``limit_period``.
+    limit_period: APIKeyLimitPeriod | None = None
+    credit_limit: int | None = Field(default=None, ge=1, le=10**15)
+    usd_limit_cents: int | None = Field(default=None, ge=1, le=10**12)
 
     @field_validator("scopes")
     @classmethod
@@ -73,6 +124,16 @@ class APIKeyCreate(BaseModel):
     def allowed_models_are_clean(cls, value: list[str] | None) -> list[str] | None:
         return validate_allowed_models(value)
 
+    @field_validator("allowed_ips")
+    @classmethod
+    def allowed_ips_are_valid(cls, value: list[str] | None) -> list[str] | None:
+        return validate_allowed_ips(value)
+
+    @model_validator(mode="after")
+    def limits_have_period(self) -> "APIKeyCreate":
+        validate_spend_limits(self.limit_period, self.credit_limit, self.usd_limit_cents)
+        return self
+
 
 class APIKeyUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
@@ -80,6 +141,10 @@ class APIKeyUpdate(BaseModel):
     expires_at: datetime | None = None
     rate_limit_per_minute: int | None = Field(default=None, ge=1, le=60_000)
     allowed_models: list[str] | None = None
+    allowed_ips: list[str] | None = None
+    limit_period: APIKeyLimitPeriod | None = None
+    credit_limit: int | None = Field(default=None, ge=1, le=10**15)
+    usd_limit_cents: int | None = Field(default=None, ge=1, le=10**12)
 
     @field_validator("scopes")
     @classmethod
@@ -98,6 +163,11 @@ class APIKeyUpdate(BaseModel):
     def allowed_models_are_clean(cls, value: list[str] | None) -> list[str] | None:
         return validate_allowed_models(value)
 
+    @field_validator("allowed_ips")
+    @classmethod
+    def allowed_ips_are_valid(cls, value: list[str] | None) -> list[str] | None:
+        return validate_allowed_ips(value)
+
 
 class APIKeyRead(BaseModel):
     id: uuid.UUID
@@ -108,6 +178,10 @@ class APIKeyRead(BaseModel):
     last_four: str
     scopes: list[str]
     allowed_models: list[str] | None
+    allowed_ips: list[str] | None = None
+    limit_period: APIKeyLimitPeriod | None = None
+    credit_limit: int | None = None
+    usd_limit_cents: int | None = None
     rate_limit_per_minute: int
     created_at: datetime
     expires_at: datetime | None
@@ -119,6 +193,20 @@ class APIKeyRead(BaseModel):
 
 class APIKeyCreateResponse(APIKeyRead):
     key: str
+
+
+class APIKeySpendRead(BaseModel):
+    """Current-period spend for a key's caps (HYP-45). Mirrors the numbers the
+    serving plane enforces against (inference_api/key_limits.py)."""
+
+    api_key_id: uuid.UUID
+    limit_period: APIKeyLimitPeriod | None
+    period_start: datetime | None
+    resets_at: datetime | None
+    credits_used: int
+    usd_cents_used: int
+    credit_limit: int | None
+    usd_limit_cents: int | None
 
 
 class APIKeyUsageSummary(BaseModel):

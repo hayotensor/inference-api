@@ -6,9 +6,9 @@ rationale: honoring ``X-Forwarded-For`` unconditionally lets any client spoof
 its own IP, so it is only trusted from a hop this deployment explicitly
 configured). This is a deliberately small, standalone copy rather than a
 shared import -- the two planes are separate deployables that do not depend on
-each other's code -- scoped to the one place this plane currently needs a
-first-hand client IP: the anonymous guest-inference abuse limiter (see
-``inference_api.guest_limits`` / HYP-67).
+each other's code -- used by the anonymous guest-inference abuse limiter (see
+``inference_api.guest_limits`` / HYP-67) and the per-API-key IP allowlist
+(``inference_api.api_keys`` / HYP-45).
 
 Unlike the control plane, this plane has no ``ClientIPMiddleware`` rewriting
 ``request.client`` up front, so callers must call ``resolve_client_ip(request)``
@@ -63,6 +63,16 @@ def resolve_client_ip(request: Request) -> str | None:
     trusted = tuple(settings.trusted_proxy_ips)
     if not trusted:
         return peer_host
+    if settings.trust_cf_connecting_ip and _is_trusted_host(peer_host, trusted):
+        # Cloudflare overwrites this header with the visitor's address, so --
+        # unlike X-Forwarded-For -- it carries no client-appended prefix to
+        # skip. Only consulted from a trusted hop (see config.py).
+        cf_ip = (request.headers.get("cf-connecting-ip") or "").strip()
+        if cf_ip:
+            try:
+                return str(ipaddress.ip_address(cf_ip))
+            except ValueError:
+                pass
     forwarded_for = request.headers.get("x-forwarded-for")
     if forwarded_for and _is_trusted_host(peer_host, trusted):
         chain = [item.strip() for item in forwarded_for.split(",") if item.strip()]

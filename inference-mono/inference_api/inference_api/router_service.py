@@ -39,6 +39,7 @@ class RouterInferenceService:
             redis_client=None,
             apply_rate_limit=False,
         )
+        self._check_model_allowed(db_key, model)
         usage_service = UsageService(self.session)
         await usage_service.expire_stale_reservations(user.id)
         period = await usage_service.current_period(user)
@@ -71,6 +72,7 @@ class RouterInferenceService:
             redis_client=redis_client,
             apply_rate_limit=True,
         )
+        self._check_model_allowed(db_key, payload.model)
         usage_service = UsageService(self.session)
         event = await usage_service.reserve_inference_tokens(
             user,
@@ -170,6 +172,12 @@ class RouterInferenceService:
         period = await usage_service.current_period(user)
         return self._reservation_response(event, period)
 
+    @staticmethod
+    def _check_model_allowed(db_key: APIKey, model: str) -> None:
+        """HYP-45: a model-scoped key is scoped on the router plane too."""
+        if db_key.allowed_models and model not in db_key.allowed_models:
+            raise forbidden(f"This API key is not permitted to use model {model!r}")
+
     async def _authenticate_user_api_key(
         self,
         raw_user_api_key: str,
@@ -178,10 +186,13 @@ class RouterInferenceService:
         apply_rate_limit: bool,
     ) -> tuple[APIKey, User]:
         api_key_service = APIKeyService(self.session)
+        # client_ip=None: the request comes from the subnet router, not the end
+        # client, so an IP-restricted user key fails closed on this plane.
         db_key = await api_key_service.authenticate_key(
             raw_user_api_key,
             redis_client,
             apply_rate_limit=apply_rate_limit,
+            client_ip=None,
         )
         api_key_service.require_scopes(db_key, ["inference:write"])
         user = await self.session.get(User, db_key.user_id)

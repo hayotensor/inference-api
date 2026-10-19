@@ -35,6 +35,21 @@ class Settings(BaseSettings):
     # consumer today is inference_api.client_ip.resolve_client_ip (see HYP-67's
     # guest-inference IP ceiling).
     trusted_proxy_ips: Annotated[list[str], NoDecode] = []
+    # When the immediate peer is one of ``trusted_proxy_ips``, prefer the
+    # ``CF-Connecting-IP`` header (set by Cloudflare / cloudflared to the real
+    # visitor IP, overwriting any client-supplied value) over walking
+    # ``X-Forwarded-For``. Off by default: only enable it when this plane is
+    # reachable solely through Cloudflare (e.g. bound to loopback behind a
+    # cloudflared tunnel), otherwise a direct client could set the header. It
+    # is never honored from an untrusted peer either way.
+    trust_cf_connecting_ip: bool = False
+
+    # HYP-45: conversion used to enforce an API key's ``usd_limit_cents`` cap on
+    # its pay-as-you-go (wallet-funded) spend. Defaults to the smallest wallet
+    # top-up's price ($10 / 1M credits, api/app/billing/plans.py), the highest
+    # per-credit rate any bundle charges, so the cap errs on stopping early.
+    # Must match the control plane's API_KEY_USD_CENTS_PER_MILLION_CREDITS.
+    api_key_usd_cents_per_million_credits: int = Field(default=1_000, ge=1)
 
     # --- Anonymous "sandbox" inference (HYP-67) ---------------------------- #
     # The homepage's unauthenticated try-it-now box. Off switch kept separate

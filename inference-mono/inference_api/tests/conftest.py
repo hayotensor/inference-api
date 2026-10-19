@@ -124,6 +124,10 @@ async def seed_api_key():
         revoked_at: datetime | None = None,
         user_active: bool = True,
         allowed_models: list[str] | None = None,
+        allowed_ips: list[str] | None = None,
+        limit_period: str | None = None,
+        credit_limit: int | None = None,
+        usd_limit_cents: int | None = None,
     ) -> SeededAPIKey:
         user = User(id=uuid.uuid4(), is_active=user_active, created_at=utcnow())
         api_key = APIKey(
@@ -132,6 +136,10 @@ async def seed_api_key():
             hashed_key=keyed_hash(raw_key),
             scopes=scopes or ["models:read", "inference:write", "usage:read"],
             allowed_models=allowed_models,
+            allowed_ips=allowed_ips,
+            limit_period=limit_period,
+            credit_limit=credit_limit,
+            usd_limit_cents=usd_limit_cents,
             rate_limit_per_minute=120,
             expires_at=expires_at,
             revoked_at=revoked_at,

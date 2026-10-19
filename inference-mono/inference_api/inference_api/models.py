@@ -89,6 +89,12 @@ class APIKey(Base):
     # Optional model allowlist, mirrored from app/db/models/api_key.py. NULL/empty
     # = unrestricted; non-empty = the key may only reach these model ids.
     allowed_models: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # HYP-45, mirrored from app/db/models/api_key.py: optional client IP/CIDR
+    # allowlist and spend caps (see inference_api/key_limits.py).
+    allowed_ips: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    limit_period: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    credit_limit: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    usd_limit_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     rate_limit_per_minute: Mapped[int] = mapped_column(Integer, nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

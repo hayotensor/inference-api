@@ -89,6 +89,11 @@ class AdminAPIKeyRead(BaseModel):
     last_four: str
     scopes: list[str]
     allowed_models: list[str] | None = None
+    # HYP-45 (read-only here; the key owner edits these from the dashboard).
+    allowed_ips: list[str] | None = None
+    limit_period: str | None = None
+    credit_limit: int | None = None
+    usd_limit_cents: int | None = None
     rate_limit_per_minute: int
     created_at: datetime
     expires_at: datetime | None

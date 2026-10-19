@@ -39,7 +39,8 @@ const keys: ApiKeyRead[] = ["Dashboard development", "Sample integration"].map((
   id: `demo-key-${index + 1}`, user_id: user.id, name, environment: "test",
   prefix: "sk_test_demo", last_four: `000${index + 1}`,
   scopes: ["models:read", "inference:write", "usage:read"], allowed_models: index ? [modelNames[0]] : null,
-  rate_limit_per_minute: 120, created_at: daysAgo(20 - index), expires_at: null,
+  allowed_ips: null, limit_period: index ? "monthly" : null, credit_limit: index ? 500_000 : null,
+  usd_limit_cents: null, rate_limit_per_minute: 120, created_at: daysAgo(20 - index), expires_at: null,
   last_used_at: daysAgo(index), revoked_at: null
 }));
 

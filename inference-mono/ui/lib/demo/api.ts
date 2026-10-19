@@ -144,6 +144,10 @@ function handle(path: string, method: string, payload?: unknown): unknown {
         id, user_id: demoUserId, name: String(body.name), environment: body.environment === "live" ? "live" : "test",
         prefix: "sk_demo", last_four: id.slice(-4), scopes: body.scopes as ApiKeyRead["scopes"],
         allowed_models: (body.allowed_models as string[] | null) ?? null,
+        allowed_ips: (body.allowed_ips as string[] | null) ?? null,
+        limit_period: (body.limit_period as ApiKeyRead["limit_period"]) ?? null,
+        credit_limit: (body.credit_limit as number | null) ?? null,
+        usd_limit_cents: (body.usd_limit_cents as number | null) ?? null,
         rate_limit_per_minute: Number(body.rate_limit_per_minute) || 120,
         created_at: new Date().toISOString(), expires_at: (body.expires_at as string | null) ?? null,
         last_used_at: null, revoked_at: null
@@ -238,6 +242,15 @@ function handle(path: string, method: string, payload?: unknown): unknown {
     const summary = required(byModel().find((item) => item.model === model));
     const page = paginate(state.events.filter((event) => event.model === model), url.searchParams);
     return { summary, events: page.data, total_events: page.total, limit: page.limit, offset: page.offset };
+  }
+
+  const spendMatch = route.match(/^\/api-keys\/([^/]+)\/spend$/);
+  if (method === "GET" && spendMatch) {
+    const apiKey = required(state.keys.find((item) => item.id === spendMatch[1]));
+    return {
+      api_key_id: apiKey.id, limit_period: apiKey.limit_period, period_start: null, resets_at: null,
+      credits_used: 0, usd_cents_used: 0, credit_limit: apiKey.credit_limit, usd_limit_cents: apiKey.usd_limit_cents
+    };
   }
 
   const keyMatch = route.match(/^\/(?:admin\/)?api-keys\/([^/]+)(\/revoke)?$/);

@@ -12,8 +12,10 @@ from app.api_keys.schemas import (
     APIKeyCreateResponse,
     APIKeyRead,
     APIKeyUpdate,
+    validate_allowed_ips,
     validate_allowed_models,
     validate_api_key_scopes,
+    validate_spend_limits,
 )
 from app.core.config import settings
 from app.core.errors import bad_request, forbidden, not_found, unauthorized
@@ -67,6 +69,10 @@ class APIKeyService:
             hashed_key=keyed_hash(full_key),
             scopes=payload.scopes,
             allowed_models=validate_allowed_models(payload.allowed_models),
+            allowed_ips=validate_allowed_ips(payload.allowed_ips),
+            limit_period=payload.limit_period.value if payload.limit_period else None,
+            credit_limit=payload.credit_limit,
+            usd_limit_cents=payload.usd_limit_cents,
             expires_at=payload.expires_at,
             rate_limit_per_minute=(
                 payload.rate_limit_per_minute or settings.api_key_default_rate_limit_per_minute
@@ -163,16 +169,44 @@ class APIKeyService:
             raise not_found("API key not found")
         return db_key
 
+    # Columns that can't be cleared: an explicit ``null`` for one of these in a
+    # PATCH means "leave it alone", not "set the NOT NULL column to NULL".
+    _NON_NULLABLE_UPDATE_FIELDS = frozenset({"name", "scopes", "rate_limit_per_minute"})
+
     async def update_key(self, user: User, key_id: uuid.UUID, payload: APIKeyUpdate) -> APIKey:
+        """Edit a key after creation (HYP-45): name, scopes, expiry, rate limit,
+        model allowlist, IP allowlist and spend caps. PATCH semantics: omitted
+        fields are untouched; an explicit ``null`` clears an optional restriction.
+        Changes take effect on the serving plane's next request (it re-reads the
+        row on every authentication).
+        """
         db_key = await self.get_key(user, key_id)
+        if db_key.revoked_at is not None:
+            raise bad_request("api_key_revoked", "A revoked API key cannot be edited")
         update_data = payload.model_dump(exclude_unset=True)
-        if "scopes" in update_data and update_data["scopes"] is not None:
+        for field in self._NON_NULLABLE_UPDATE_FIELDS:
+            if field in update_data and update_data[field] is None:
+                del update_data[field]
+        if "scopes" in update_data:
             validate_api_key_scopes(update_data["scopes"])
         if "allowed_models" in update_data:
             update_data["allowed_models"] = validate_allowed_models(update_data["allowed_models"])
+        if "allowed_ips" in update_data:
+            update_data["allowed_ips"] = validate_allowed_ips(update_data["allowed_ips"])
+        if update_data.get("limit_period") is not None:
+            update_data["limit_period"] = update_data["limit_period"].value
+        try:
+            validate_spend_limits(
+                update_data.get("limit_period", db_key.limit_period),
+                update_data.get("credit_limit", db_key.credit_limit),
+                update_data.get("usd_limit_cents", db_key.usd_limit_cents),
+            )
+        except ValueError as exc:
+            raise bad_request("invalid_spend_limits", str(exc)) from exc
         for field, value in update_data.items():
             setattr(db_key, field, value)
         self.session.add(db_key)
+        await self.session.flush()
         return db_key
 
     async def revoke_key(self, user: User, key_id: uuid.UUID) -> APIKey:

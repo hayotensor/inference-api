@@ -9,9 +9,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from inference_api.client_ip import resolve_client_ip
 from inference_api.config import settings
 from inference_api.db import get_async_session
 from inference_api.errors import forbidden, unauthorized
+from inference_api.key_limits import check_ip_allowed
 from inference_api.logging import request_id_ctx
 from inference_api.models import APIKey, APIKeyUsage, User
 from inference_api.redis import get_redis
@@ -35,7 +37,15 @@ class APIKeyService:
         redis_client: redis.Redis | None = None,
         *,
         apply_rate_limit: bool = True,
+        client_ip: str | None = None,
     ) -> APIKey:
+        """Validate ``raw_key`` and its owner, then apply the key's IP allowlist
+        (HYP-45) and rate limit.
+
+        ``client_ip`` must be the trusted-proxy-resolved caller IP
+        (``client_ip.resolve_client_ip``); ``None`` means "unknown" and is
+        rejected for an IP-restricted key (fail closed).
+        """
         token_hash = keyed_hash(raw_key)
         result = await self.session.execute(select(APIKey).where(APIKey.hashed_key == token_hash))
         db_key = result.scalar_one_or_none()
@@ -60,6 +70,7 @@ class APIKeyService:
             raise unauthorized("API key owner no longer exists")
         if not user.is_active:
             raise forbidden("API key owner is inactive")
+        check_ip_allowed(db_key, client_ip)
         if apply_rate_limit:
             await self.enforce_rate_limit(db_key, redis_client)
         db_key.last_used_at = utcnow()
@@ -158,7 +169,7 @@ async def current_api_key(
     redis_client: redis.Redis = Depends(get_redis),
 ) -> APIKey:
     service = APIKeyService(session)
-    db_key = await service.authenticate_key(raw_key, redis_client)
+    db_key = await service.authenticate_key(raw_key, redis_client, client_ip=resolve_client_ip(request))
     request.state.api_key = db_key
     return db_key
 

@@ -21,7 +21,9 @@ import type {
   AdminWalletSyncResponse,
   ApiKeyCreateResponse,
   ApiKeyRead,
+  ApiKeyLimitPeriod,
   ApiKeyScope,
+  ApiKeySpend,
   BalanceSyncResponse,
   BillingHistoryResponse,
   BillingInterval,
@@ -450,6 +452,16 @@ export const userApi = {
   }
 };
 
+// HYP-45 optional per-key conditions, shared by create and edit (PATCH: an
+// explicit null clears that restriction; an omitted field is left as-is).
+export type ApiKeyRestrictions = {
+  allowed_models?: string[] | null;
+  allowed_ips?: string[] | null;
+  limit_period?: ApiKeyLimitPeriod | null;
+  credit_limit?: number | null;
+  usd_limit_cents?: number | null;
+};
+
 export const apiKeysApi = {
   list(options: ApiCallOptions = {}) {
     return apiRequest<ApiKeyRead[]>("/api-keys", {
@@ -471,8 +483,7 @@ export const apiKeysApi = {
     scopes: ApiKeyScope[];
     expires_at?: string | null;
     rate_limit_per_minute?: number | null;
-    allowed_models?: string[] | null;
-  }) {
+  } & ApiKeyRestrictions) {
     return apiRequest<ApiKeyCreateResponse>("/api-keys", {
       method: "POST",
       auth: true,
@@ -486,13 +497,18 @@ export const apiKeysApi = {
       scopes?: ApiKeyScope[];
       expires_at?: string | null;
       rate_limit_per_minute?: number | null;
-      allowed_models?: string[] | null;
-    }
+    } & ApiKeyRestrictions
   ) {
     return apiRequest<ApiKeyRead>(`/api-keys/${keyId}`, {
       method: "PATCH",
       auth: true,
       body: payload
+    });
+  },
+  spend(keyId: string, options: ApiCallOptions = {}) {
+    return apiRequest<ApiKeySpend>(`/api-keys/${keyId}/spend`, {
+      auth: true,
+      signal: options.signal
     });
   },
   revoke(keyId: string) {
