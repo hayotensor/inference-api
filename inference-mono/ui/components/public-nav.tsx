@@ -37,6 +37,8 @@ type NavLink = {
   external?: boolean;
 };
 
+const DOCS_URL = (process.env.NEXT_PUBLIC_DOCS_URL || "https://talaris-inference-docs.rizzo.network").replace(/\/+$/, "");
+
 const productLinks: NavLink[] = [
   { label: "API", href: "/docs", icon: Code2 },
   { label: "Models", href: "/models", icon: Boxes },
@@ -44,8 +46,8 @@ const productLinks: NavLink[] = [
 ];
 
 const resourceLinks: NavLink[] = [
-  { label: "API documentation", href: "#", icon: Code2 },
-  { label: "Miner documentation", href: "#", icon: BookOpen },
+  { label: "API documentation", href: `${DOCS_URL}/api-reference/`, icon: Code2, external: true },
+  { label: "Miner documentation", href: `${DOCS_URL}/miner-node/`, icon: BookOpen, external: true },
   { label: "Privacy policy", href: "/privacy", icon: LockKeyhole },
   { label: "Terms of Service", href: "/terms", icon: FileText },
   { label: "Privacy & Security", href: "/security", icon: ShieldCheck },
